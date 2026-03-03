@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../backend"
+		},
+		{
+			"path": "../docker"
+		},
+		{
+			"path": "../docs"
+		},
+		{
+			"path": "../infra"
+		},
+		{
+			"path": "../mobile"
+		},
+		{
+			"path": "../web"
+		}
+	]
+}

@@ -1,0 +1,13 @@
+CapitalGuard Algo Trader – How to start
+
+BACKEND (required for dashboard and Upstox):
+  From this folder, run in PowerShell:
+    .\Start-Backend.ps1
+  Do NOT run "uvicorn app.main:app" from this folder – it will start the wrong app and crash.
+
+WEB:
+  cd web
+  npm run dev
+  Then open http://localhost:3000
+
+See docs/INSTALL_AND_RUN.md for full steps.

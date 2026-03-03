@@ -1,0 +1,306 @@
+/* Dasari's Algo Trading terminal – Dashboard theme */
+:root {
+  --bg-page: #0f1419;
+  --bg-card: #1a2332;
+  --bg-card-hover: #1e2a3b;
+  --border: #2d3a4d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent: #238636;
+  --accent-hover: #2ea043;
+  --danger: #da3633;
+  --danger-hover: #f85149;
+  --warning: #d29922;
+  --positive: #3fb950;
+  --negative: #f85149;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.25rem 1.5rem;
+}
+
+.card-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin: 0 0 0.75rem 0;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--border);
+}
+
+.btn-danger:hover {
+  background: rgba(218, 54, 51, 0.15);
+  border-color: var(--danger);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Status badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+.badge-success {
+  background: rgba(63, 185, 80, 0.2);
+  color: var(--positive);
+}
+
+.badge-error {
+  background: rgba(248, 81, 73, 0.2);
+  color: var(--negative);
+}
+
+.badge-warning {
+  background: rgba(210, 153, 34, 0.2);
+  color: var(--warning);
+}
+
+.badge-neutral {
+  background: rgba(139, 148, 158, 0.2);
+  color: var(--text-secondary);
+}
+
+/* Summary numbers */
+.summary-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.summary-value.positive { color: var(--positive); }
+.summary-value.negative { color: var(--negative); }
+
+/* Dashboard sections */
+.dashboard-section {
+  padding: 1.25rem 1.5rem;
+}
+
+/* Trade settings – aligned grid; min column width so dropdown text doesn't truncate */
+.trade-settings-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.trade-settings-field {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.trade-settings-field label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 0.375rem;
+  line-height: 1.2;
+}
+
+.trade-settings-input {
+  width: 100%;
+  min-width: 10rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  height: 2.25rem;
+  min-height: 2.25rem;
+  box-sizing: border-box;
+}
+
+select.trade-settings-input {
+  min-width: 11.5rem;
+  appearance: auto;
+}
+
+.trade-settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.trade-settings-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  line-height: 1.2;
+}
+
+/* Trading overview – summary grid */
+.overview-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 900px) {
+  .overview-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .overview-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Positions + History row */
+.overview-positions-history {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+}
+
+@media (max-width: 700px) {
+  .overview-positions-history {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Trading overview – metrics */
+.overview-metric {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem;
+  background: var(--bg-page);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.overview-metric-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.overview-metric-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.overview-metric-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+/* Overview tables */
+.overview-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-page);
+}
+
+.overview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.overview-table th,
+.overview-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.overview-table th {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.overview-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 900px) {
+  .trade-settings-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .trade-settings-row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,48 @@
+# Local dev: API + PostgreSQL + Redis
+# Usage: docker-compose up -d; run API locally with .env or docker-compose run api uvicorn app.main:app --reload
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://capitalguard:capitalguard@db:5432/capitalguard
+      - REDIS_URL=redis://redis:6379/0
+      - APP_ENV=development
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: capitalguard
+      POSTGRES_PASSWORD: capitalguard
+      POSTGRES_DB: capitalguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U capitalguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata: {}
+  redisdata: {}
