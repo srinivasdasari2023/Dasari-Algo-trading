@@ -111,6 +111,7 @@ export default function DashboardPage() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
+  const [marketDataIssue, setMarketDataIssue] = useState<string | null>(null);
   const [marketNifty, setMarketNifty] = useState<MarketContext | null>(null);
   const [marketSensex, setMarketSensex] = useState<MarketContext | null>(null);
   const [extendedNifty, setExtendedNifty] = useState<ExtendedMarketContext | null>(null);
@@ -226,28 +227,55 @@ export default function DashboardPage() {
       setMarketSensex(null);
       setExtendedNifty(null);
       setExtendedSensex(null);
+      setMarketDataIssue(null);
       return;
     }
     setBackendReachable(true);
     try {
-      const [niftyRes, sensexRes, extNiftyRes, extSensexRes] = await Promise.all([
+      const settled = await Promise.allSettled([
         fetch(`${API_BASE}/market/context/NIFTY`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
         fetch(`${API_BASE}/market/context/SENSEX`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
         fetch(`${API_BASE}/market/context/extended/NIFTY`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
         fetch(`${API_BASE}/market/context/extended/SENSEX`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
       ]);
-      const niftyData = niftyRes.ok ? await niftyRes.json() : null;
-      const sensexData = sensexRes.ok ? await sensexRes.json() : null;
-      setMarketNifty(niftyData ? { symbol: niftyData.symbol, last_price: niftyData.last_price, bias: niftyData.bias, source: niftyData.source } : null);
-      setMarketSensex(sensexData ? { symbol: sensexData.symbol, last_price: sensexData.last_price, bias: sensexData.bias, source: sensexData.source } : null);
-      setExtendedNifty(extNiftyRes.ok ? await extNiftyRes.json() : null);
-      setExtendedSensex(extSensexRes.ok ? await extSensexRes.json() : null);
+
+      const resNifty = settled[0].status === 'fulfilled' ? settled[0].value : null;
+      const resSensex = settled[1].status === 'fulfilled' ? settled[1].value : null;
+      const resExtNifty = settled[2].status === 'fulfilled' ? settled[2].value : null;
+      const resExtSensex = settled[3].status === 'fulfilled' ? settled[3].value : null;
+
+      const safeJson = async (res: Response | null) => {
+        if (!res || !res.ok) return null;
+        try {
+          return await res.json();
+        } catch {
+          return null;
+        }
+      };
+
+      const [niftyData, sensexData, extNiftyData, extSensexData] = await Promise.all([
+        safeJson(resNifty),
+        safeJson(resSensex),
+        safeJson(resExtNifty),
+        safeJson(resExtSensex),
+      ]);
+
+      setMarketNifty((prev) =>
+        niftyData ? { symbol: niftyData.symbol, last_price: niftyData.last_price, bias: niftyData.bias, source: niftyData.source } : prev
+      );
+      setMarketSensex((prev) =>
+        sensexData ? { symbol: sensexData.symbol, last_price: sensexData.last_price, bias: sensexData.bias, source: sensexData.source } : prev
+      );
+      setExtendedNifty((prev) => (extNiftyData ? extNiftyData : prev));
+      setExtendedSensex((prev) => (extSensexData ? extSensexData : prev));
+
+      const anyFailed =
+        settled.some((s) => s.status === 'rejected') ||
+        [resNifty, resSensex, resExtNifty, resExtSensex].some((r) => r !== null && !r.ok);
+      setMarketDataIssue(anyFailed ? 'Market data delayed (retrying…)' : null);
     } catch {
-      setMarketNifty(null);
-      setMarketSensex(null);
-      setExtendedNifty(null);
-      setExtendedSensex(null);
-      setBackendReachable(false);
+      // Backend is reachable (health OK), but market data fetch failed/timed out.
+      setMarketDataIssue('Market data delayed (retrying…)');
     }
   }, [upstoxConnected]);
 
@@ -578,6 +606,11 @@ export default function DashboardPage() {
                 </button>
               </>
             )}
+            {backendReachable === true && marketDataIssue && (
+              <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                Data delayed
+              </span>
+            )}
             <span
               className={upstoxConnected ? 'badge badge-success' : 'badge badge-error'}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
@@ -721,7 +754,7 @@ export default function DashboardPage() {
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
                     {backendReachable === false
                       ? 'Backend not reachable. Start the backend (run .\\Start-All.ps1 from project root).'
-                      : 'Fetching… (market may be closed)'}
+                      : (marketDataIssue ?? 'Fetching… (market may be closed)')}
                   </div>
                 )}
               </>

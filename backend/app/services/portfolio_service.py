@@ -110,9 +110,22 @@ async def analyze_intraday_opportunity_15m(
     bias = "BUY" if ema20 > ema200 else ("SELL" if ema20 < ema200 else "NO_TRADE")
 
     prev, curr = candles[-2], candles[-1]
+    prev_dt = _candle_dt_ist(prev)
+    curr_dt = _candle_dt_ist(curr)
+    last_time = curr_dt.strftime("%Y-%m-%dT%H:%M") if curr_dt else None
+
+    # Avoid cross-day engulfing (yesterday's last candle vs today's first candle).
+    if prev_dt and curr_dt and prev_dt.date() != curr_dt.date():
+        return {
+            "status": "NO_SIGNAL",
+            "reason": "Waiting for today's 15m candles (latest candle is from previous day)",
+            "bias": bias,
+            "ema20": round(ema20, 2) if ema20 else None,
+            "ema200": round(ema200, 2) if ema200 else None,
+            "last_15m_time": last_time,
+        }
+
     patt = detect_engulfing(prev, curr, min_body_ratio=1.2)
-    last_dt = _candle_dt_ist(curr)
-    last_time = last_dt.strftime("%Y-%m-%dT%H:%M") if last_dt else None
 
     if not patt:
         return {

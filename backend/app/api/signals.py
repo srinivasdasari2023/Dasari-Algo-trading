@@ -1,5 +1,5 @@
 """Signal evaluation and status. Fetches candles, runs strategy, returns signal."""
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time as dt_time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -20,6 +20,16 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # In-memory signal history (last N); use DB in production
 _signal_history: list[dict] = []
 _SIGNAL_HISTORY_MAX = 100
+
+# NSE market hours IST (avoid cross-day pattern issues at session open/close)
+MARKET_OPEN = dt_time(9, 15)
+MARKET_CLOSE = dt_time(15, 30)
+
+
+def _is_market_hours_ist(ts: datetime) -> bool:
+    dt = ts.astimezone(IST) if ts.tzinfo else ts.replace(tzinfo=IST)
+    t = dt.time()
+    return MARKET_OPEN <= t <= MARKET_CLOSE
 
 
 class RiskCheckItem(BaseModel):
@@ -91,17 +101,26 @@ async def evaluate_signal(symbol: str):
             risk_checklist=[],
         )
 
-    if not candles_5m:
+    # Filter to today's 5m candles within market hours (IST) so we don't
+    # accidentally compare yesterday's last candle with today's first candle.
+    today_ist = datetime.now(IST).date()
+    candles_5m_today: list[dict] = []
+    for c in candles_5m or []:
+        ts_c = _parse_ts(c.get("timestamp"))
+        if ts_c.date() == today_ist and _is_market_hours_ist(ts_c):
+            candles_5m_today.append(c)
+
+    if not candles_5m_today:
         return SignalResponse(
             signal_id=None,
             status="NO_SIGNAL",
-            reason="No 5m candle data (market may be closed)",
+            reason="No 5m candle data for today yet (market may be closed)",
             time_window_ok=False,
             risk_checklist=[],
         )
 
     # Build context from latest 5m candle
-    last_5 = candles_5m[-1]
+    last_5 = candles_5m_today[-1]
     ts = _parse_ts(last_5["timestamp"])
     ctx = MarketContext(
         symbol=symbol_upper,
@@ -122,17 +141,24 @@ async def evaluate_signal(symbol: str):
 
     # Engulfing on last two 5m candles
     engulfing = None
-    if len(candles_5m) >= 2:
-        prev_5 = candles_5m[-2]
+    if len(candles_5m_today) >= 2:
+        prev_5 = candles_5m_today[-2]
         engulfing = detect_engulfing(prev_5, last_5)
 
     # Entry sequence: last two 2m candles
     entry_ok = False
-    if len(candles_2m) >= 2 and engulfing:
-        pullback = candles_2m[-2]
-        next_c = candles_2m[-1]
-        from app.services.strategy_engine import check_entry_sequence
-        entry_ok = check_entry_sequence(pullback, next_c, ema20_2m, engulfing.direction)
+    if engulfing:
+        candles_2m_today: list[dict] = []
+        for c in candles_2m or []:
+            ts2 = _parse_ts(c.get("timestamp"))
+            if ts2.date() == today_ist and _is_market_hours_ist(ts2):
+                candles_2m_today.append(c)
+
+        if len(candles_2m_today) >= 2:
+            pullback = candles_2m_today[-2]
+            next_c = candles_2m_today[-1]
+            from app.services.strategy_engine import check_entry_sequence
+            entry_ok = check_entry_sequence(pullback, next_c, ema20_2m, engulfing.direction)
 
     # Risk: daily limits (placeholder counts until we have DB)
     risk_result = check_daily_limits(daily_trade_count=0, daily_loss_count=0)
