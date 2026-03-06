@@ -19,6 +19,7 @@ Capital-preserving, high-probability index options trading system. Trades only t
 | [docs/BRD.md](docs/BRD.md) | Business requirements, risk-first philosophy, MVP vs Phase-2 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | C4 + event model, service responsibilities, idempotency |
 | [docs/INFRASTRUCTURE_DEVOPS.md](docs/INFRASTRUCTURE_DEVOPS.md) | Terraform, CI/CD, secrets, backups, cost guardrails |
+| [docs/CLOUD_AND_SCHEDULE.md](docs/CLOUD_AND_SCHEDULE.md) | Deploy to cloud (Vercel + Render/Railway), run weekdays 9:15–15:30 IST only |
 | [docs/DELIVERY_PLAN.md](docs/DELIVERY_PLAN.md) | MVP roadmap, 8–10 sprints, epics/stories, RAID |
 
 ---

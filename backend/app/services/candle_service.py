@@ -4,7 +4,7 @@ In-memory cache; use Redis/DB in production.
 """
 import asyncio
 import logging
-from datetime import date, datetime as dt_parse, timedelta, timezone
+from datetime import date, datetime as dt_parse, timedelta, timezone, time as dt_time
 import urllib.parse
 import httpx
 
@@ -108,6 +108,46 @@ async def fetch_candles(
         return []
 
 
+async def fetch_candles_instrument(
+    token: str,
+    instrument_key: str,
+    interval_min: int,
+    to_date: date,
+    from_date: date | None = None,
+) -> list[dict]:
+    """Fetch historical candles for an Upstox instrument_key (no symbol mapping). Never raises; returns [] on error."""
+    if not instrument_key:
+        return []
+    encoded = urllib.parse.quote(str(instrument_key), safe="")
+    to_s = to_date.isoformat()
+    from_s = (from_date or to_date).isoformat()
+    url = f"https://api.upstox.com/v3/historical-candle/{encoded}/minutes/{interval_min}/{to_s}/{from_s}"
+    try:
+        async with httpx.AsyncClient(timeout=18.0) as client:
+            resp = await client.get(
+                url,
+                headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code != 200:
+            _log.warning("Upstox candles %sm %s: HTTP %s", interval_min, instrument_key, resp.status_code)
+            return []
+        data = resp.json()
+        candles = data.get("data", {}).get("candles", [])
+        out = []
+        for r in candles:
+            try:
+                out.append(_parse_candle(r))
+            except (KeyError, TypeError, IndexError, ValueError):
+                continue
+        return out
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as e:
+        _log.warning("Upstox candles %sm %s: %s", interval_min, instrument_key, e)
+        return []
+    except Exception as e:
+        _log.warning("Upstox candles %sm %s: %s", interval_min, instrument_key, e, exc_info=True)
+        return []
+
+
 async def fetch_intraday_candles(
     token: str,
     symbol: str,
@@ -145,6 +185,41 @@ async def fetch_intraday_candles(
         _log.warning("Upstox intraday candles %sm %s: %s", interval_min, symbol, e, exc_info=True)
         return []
 
+
+async def fetch_intraday_candles_instrument(
+    token: str,
+    instrument_key: str,
+    interval_min: int,
+) -> list[dict]:
+    """Fetch current-day intraday candles for an instrument_key. Never raises; returns [] on error."""
+    if not instrument_key:
+        return []
+    encoded = urllib.parse.quote(str(instrument_key), safe="")
+    url = f"https://api.upstox.com/v3/historical-candle/intraday/{encoded}/minutes/{interval_min}"
+    try:
+        async with httpx.AsyncClient(timeout=18.0) as client:
+            resp = await client.get(
+                url,
+                headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code != 200:
+            _log.warning("Upstox intraday candles %sm %s: HTTP %s", interval_min, instrument_key, resp.status_code)
+            return []
+        data = resp.json()
+        candles = data.get("data", {}).get("candles", [])
+        out = []
+        for r in candles:
+            try:
+                out.append(_parse_candle(r))
+            except (KeyError, TypeError, IndexError, ValueError):
+                continue
+        return out
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as e:
+        _log.warning("Upstox intraday candles %sm %s: %s", interval_min, instrument_key, e)
+        return []
+    except Exception as e:
+        _log.warning("Upstox intraday candles %sm %s: %s", interval_min, instrument_key, e, exc_info=True)
+        return []
 
 async def fetch_daily_candles(
     token: str,
@@ -197,7 +272,7 @@ async def get_candles_and_indicators(
     """
     today_ist = _now_ist().date()
     from_15 = today_ist - timedelta(days=10)
-    from_5 = today_ist - timedelta(days=3)
+    from_5 = today_ist - timedelta(days=7)  # 7 days so chart has previous days' 5m candles
     from_2 = today_ist - timedelta(days=1)
 
     hist_15m, hist_5m, hist_2m, intra_15m, intra_5m, intra_2m = await asyncio.gather(
@@ -268,7 +343,8 @@ def _candle_dt_ist(c: dict):
             dt = dt_parse.fromisoformat(ts.replace("Z", "+00:00"))
             if dt.tzinfo:
                 return dt.astimezone(IST)
-            return dt.replace(tzinfo=IST)
+            # Naive timestamp: assume UTC (API standard), convert to IST so market hours show 9:15–15:30
+            return dt.replace(tzinfo=UTC).astimezone(IST)
         if ts[:10].replace("-", "").isdigit() and len(ts) >= 10:
             return dt_parse.strptime(ts[:10], "%Y-%m-%d").replace(tzinfo=IST)
         try:
@@ -289,10 +365,89 @@ def _candle_date_ist(c: dict) -> date | None:
     return dt.date() if dt else None
 
 
+def _daily_candle_trading_date(c: dict) -> date | None:
+    """For daily candles: return trading date from timestamp string (YYYY-MM-DD). Avoids UTC session-end shifting date in IST."""
+    raw = c.get("timestamp")
+    if raw is None:
+        return None
+    s = str(raw).strip()[:10]
+    if len(s) == 10 and s[:4].isdigit() and s[4] == "-" and s[5:7].isdigit() and s[7] == "-" and s[8:10].isdigit():
+        try:
+            return dt_parse.strptime(s, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    return _candle_date_ist(c)
+
+
 def _candle_sort_key(c: dict) -> float:
     """Epoch (seconds) for sorting candles chronologically."""
     dt = _candle_dt_ist(c)
     return dt.timestamp() if dt else 0.0
+
+
+# NSE/BSE market hours IST: 9:15 AM – 3:30 PM. Opening range = first candle at 9:15.
+MARKET_OPEN = dt_time(9, 15)
+MARKET_CLOSE = dt_time(15, 30)
+OPENING_TIME = dt_time(9, 15)
+
+
+def _is_market_hours_ist(dt: dt_parse) -> bool:
+    """True if time is within NSE market hours 9:15–15:30 IST."""
+    if not dt or dt.tzinfo is None:
+        return False
+    t = dt.time()
+    return MARKET_OPEN <= t <= MARKET_CLOSE
+
+
+def _opening_candle_today(candles_today: list[dict], today_ist: date):
+    """Return the opening candle (9:15 AM IST) from today's list; else earliest candle of the day."""
+    if not candles_today:
+        return None
+    sorted_c = sorted(candles_today, key=_candle_sort_key)
+    for c in sorted_c:
+        dt = _candle_dt_ist(c)
+        if not dt or dt.date() != today_ist:
+            continue
+        t = dt.time()
+        if t == OPENING_TIME:
+            return c
+        if t >= MARKET_OPEN:
+            return c
+    return sorted_c[0]
+
+
+def _candles_in_window_ist(
+    candles: list[dict],
+    day_ist: date,
+    start_t: dt_time,
+    end_t: dt_time,
+) -> list[dict]:
+    """Candles whose IST timestamp is within [start_t, end_t)."""
+    out: list[dict] = []
+    for c in candles or []:
+        dt = _candle_dt_ist(c)
+        if not dt or dt.date() != day_ist:
+            continue
+        t = dt.time()
+        if start_t <= t < end_t:
+            out.append(c)
+    return sorted(out, key=_candle_sort_key)
+
+
+def _candles_at_times_ist(
+    candles: list[dict],
+    day_ist: date,
+    times: set[dt_time],
+) -> list[dict]:
+    """Candles whose IST timestamp time() matches one of the provided times."""
+    out: list[dict] = []
+    for c in candles or []:
+        dt = _candle_dt_ist(c)
+        if not dt or dt.date() != day_ist:
+            continue
+        if dt.time() in times:
+            out.append(c)
+    return sorted(out, key=_candle_sort_key)
 
 
 async def get_extended_market_context(token: str, symbol: str) -> dict:
@@ -330,54 +485,64 @@ async def get_extended_market_context(token: str, symbol: str) -> dict:
     candles_5m_today = [c for c in candles_5m if _candle_date_ist(c) == today_ist]
     candles_15m_today = [c for c in candles_15m if _candle_date_ist(c) == today_ist]
 
-    # Previous day high/low/close from DAILY candle. Prefer calendar yesterday; else last trading day before today.
+    # Previous day high/low/close from DAILY candle. Use trading date (YYYY-MM-DD) so CPR matches actual prev day.
     prev_day_high = prev_day_low = prev_day_close = None
     if daily_candles:
         daily_sorted = sorted(daily_candles, key=_candle_sort_key)
-        # First try: candle whose date is exactly yesterday_ist (calendar yesterday)
         for c in daily_sorted:
-            if _candle_date_ist(c) == yesterday_ist:
+            d = _daily_candle_trading_date(c)
+            if d == yesterday_ist:
                 prev_day_high = c["high"]
                 prev_day_low = c["low"]
                 prev_day_close = c["close"]
                 break
-        # Fallback: no candle for yesterday (weekend/holiday) -> use last trading day before today
         if prev_day_close is None:
-            prev_before_today = [c for c in daily_sorted if _candle_date_ist(c) and _candle_date_ist(c) < today_ist]
+            prev_before_today = [c for c in daily_sorted if _daily_candle_trading_date(c) and _daily_candle_trading_date(c) < today_ist]
             if prev_before_today:
                 prev_candle = prev_before_today[-1]
                 prev_day_high = prev_candle["high"]
                 prev_day_low = prev_candle["low"]
                 prev_day_close = prev_candle["close"]
 
-    # Opening range = first candle of the day (9:15 5m and 9:15 15m). Prefer today; fallback to latest session if today has no data.
+    # Opening ranges based on 5m candles.
+    # Note: Some feeds timestamp 5m bars at the *end* of the interval (09:20 for 09:15–09:20).
+    # We prefer the candle at 09:20 for opening 5m, and 09:20/09:25/09:30 for opening 15m.
     range_5m_low = range_5m_high = range_15m_low = range_15m_high = None
-    if candles_5m_today:
-        first_5 = candles_5m_today[0]
-        range_5m_low = first_5["low"]
-        range_5m_high = first_5["high"]
-    elif candles_5m:
+
+    # Use candles from "today" if available; else use latest available session date.
+    opening_day = today_ist
+    sorted_5m_for_day = sorted(candles_5m_today, key=_candle_sort_key) if candles_5m_today else []
+    if not sorted_5m_for_day and candles_5m:
         dates_5m = sorted({_candle_date_ist(c) for c in candles_5m if _candle_date_ist(c)}, reverse=True)
         if dates_5m:
-            last_date = dates_5m[0]
-            first_of_day = [c for c in candles_5m if _candle_date_ist(c) == last_date]
-            if first_of_day:
-                first_5 = first_of_day[0]
-                range_5m_low = first_5["low"]
-                range_5m_high = first_5["high"]
-    if candles_15m_today:
-        first_15 = candles_15m_today[0]
-        range_15m_low = first_15["low"]
-        range_15m_high = first_15["high"]
-    elif candles_15m:
-        dates_15m = sorted({_candle_date_ist(c) for c in candles_15m if _candle_date_ist(c)}, reverse=True)
-        if dates_15m:
-            last_date = dates_15m[0]
-            first_of_day = [c for c in candles_15m if _candle_date_ist(c) == last_date]
-            if first_of_day:
-                first_15 = first_of_day[0]
-                range_15m_low = first_15["low"]
-                range_15m_high = first_15["high"]
+            opening_day = dates_5m[0]
+            sorted_5m_for_day = sorted([c for c in candles_5m if _candle_date_ist(c) == opening_day], key=_candle_sort_key)
+
+    if sorted_5m_for_day:
+        # Preferred: exact bar timestamped at 09:20 (end of opening 5m)
+        win_5 = _candles_at_times_ist(sorted_5m_for_day, opening_day, {dt_time(9, 20)})
+        if not win_5:
+            # Fallback: treat timestamps as start-of-bar and pick [09:15, 09:20)
+            win_5 = _candles_in_window_ist(sorted_5m_for_day, opening_day, OPENING_TIME, dt_time(9, 20))
+        if not win_5:
+            # fallback: pick candle at/after 9:15
+            c0 = _opening_candle_today(sorted_5m_for_day, opening_day)
+            win_5 = [c0] if c0 else []
+        if win_5:
+            range_5m_low = min(c["low"] for c in win_5)
+            range_5m_high = max(c["high"] for c in win_5)
+
+        win_15 = _candles_at_times_ist(sorted_5m_for_day, opening_day, {dt_time(9, 20), dt_time(9, 25), dt_time(9, 30)})
+        if not win_15:
+            # Fallback: treat timestamps as start-of-bar and pick [09:15, 09:30)
+            win_15 = _candles_in_window_ist(sorted_5m_for_day, opening_day, OPENING_TIME, dt_time(9, 30))
+        if not win_15:
+            # fallback: first 3 after 9:15
+            after_open = [c for c in sorted_5m_for_day if (_candle_dt_ist(c) and _candle_dt_ist(c).time() >= OPENING_TIME)]
+            win_15 = after_open[:3]
+        if win_15:
+            range_15m_low = min(c["low"] for c in win_15)
+            range_15m_high = max(c["high"] for c in win_15)
 
     # CPR = Central Pivot Range from PREVIOUS trading day's High, Low, Close (from daily candle).
     if prev_day_high is not None and prev_day_low is not None and prev_day_close is not None:
@@ -385,20 +550,22 @@ async def get_extended_market_context(token: str, symbol: str) -> dict:
             "high": prev_day_high, "low": prev_day_low, "close": prev_day_close,
         })
 
-    # Build chart candles (5m yesterday+today) from same data so chart reuses extended context
-    chart_dates = {yesterday_ist, today_ist}
+    # Build chart candles: include last 3 calendar days (today, yesterday, day before) so previous days show
+    day_before = today_ist - timedelta(days=2)
+    chart_dates = {today_ist, yesterday_ist, day_before}
     candles_5m_chart = [c for c in candles_5m if _candle_date_ist(c) in chart_dates]
     if not candles_5m_chart and candles_5m:
+        # Fallback: use all dates we have so at least previous days appear
         dates_5m = sorted({_candle_date_ist(c) for c in candles_5m if _candle_date_ist(c)}, reverse=True)
-        if len(dates_5m) >= 2:
-            chart_dates = set(dates_5m[:2])
-        else:
-            chart_dates = set(dates_5m) if dates_5m else chart_dates
-        candles_5m_chart = [c for c in candles_5m if _candle_date_ist(c) in chart_dates]
+        if dates_5m:
+            chart_dates = set(dates_5m[:5])  # up to 5 most recent days
+            candles_5m_chart = [c for c in candles_5m if _candle_date_ist(c) in chart_dates]
+        if not candles_5m_chart:
+            candles_5m_chart = candles_5m  # show all we have
     chart_candles = []
     for c in candles_5m_chart:
         dt = _candle_dt_ist(c)
-        if not dt:
+        if not dt or not _is_market_hours_ist(dt):
             continue
         time_str = dt.strftime("%Y-%m-%dT%H:%M")
         chart_candles.append({
@@ -451,7 +618,7 @@ async def get_chart_data(token: str, symbol: str) -> dict:
     """
     today_ist = _now_ist().date()
     yesterday_ist = today_ist - timedelta(days=1)
-    from_date = today_ist - timedelta(days=5)  # wider range so API returns candles
+    from_date = today_ist - timedelta(days=7)  # 7 days so previous days' 5m candles are returned
 
     hist_15m, hist_5m, intra_15m, intra_5m, daily_candles = await asyncio.gather(
         fetch_candles(token, symbol, 15, today_ist, from_date),
@@ -477,16 +644,17 @@ async def get_chart_data(token: str, symbol: str) -> dict:
 
     candles_15m = sorted(candles_15m, key=_candle_sort_key)
     candles_5m = sorted(candles_5m, key=_candle_sort_key)
-    # Restrict 5m chart to yesterday and today; if none (e.g. weekend), use last 2 trading days
-    chart_dates = {yesterday_ist, today_ist}
+    # Include last 3 calendar days so chart shows previous days' candlesticks
+    day_before = today_ist - timedelta(days=2)
+    chart_dates = {today_ist, yesterday_ist, day_before}
     candles_5m_filtered = [c for c in candles_5m if _candle_date_ist(c) in chart_dates]
     if not candles_5m_filtered and candles_5m:
         dates_5m = sorted({_candle_date_ist(c) for c in candles_5m if _candle_date_ist(c)}, reverse=True)
-        if len(dates_5m) >= 2:
-            chart_dates = set(dates_5m[:2])
-        else:
-            chart_dates = set(dates_5m)
-        candles_5m_filtered = [c for c in candles_5m if _candle_date_ist(c) in chart_dates]
+        if dates_5m:
+            chart_dates = set(dates_5m[:5])
+            candles_5m_filtered = [c for c in candles_5m if _candle_date_ist(c) in chart_dates]
+        if not candles_5m_filtered:
+            candles_5m_filtered = candles_5m
     candles_5m = candles_5m_filtered
 
     candles_5m_today = [c for c in candles_5m if _candle_date_ist(c) == today_ist]
@@ -496,13 +664,13 @@ async def get_chart_data(token: str, symbol: str) -> dict:
     if daily_candles:
         daily_sorted = sorted(daily_candles, key=_candle_sort_key)
         for c in daily_sorted:
-            if _candle_date_ist(c) == yesterday_ist:
+            if _daily_candle_trading_date(c) == yesterday_ist:
                 prev_day_high = c["high"]
                 prev_day_low = c["low"]
                 prev_day_close = c["close"]
                 break
         if prev_day_close is None:
-            prev_before_today = [c for c in daily_sorted if _candle_date_ist(c) and _candle_date_ist(c) < today_ist]
+            prev_before_today = [c for c in daily_sorted if _daily_candle_trading_date(c) and _daily_candle_trading_date(c) < today_ist]
             if prev_before_today:
                 prev_candle = prev_before_today[-1]
                 prev_day_high = prev_candle["high"]
@@ -516,32 +684,42 @@ async def get_chart_data(token: str, symbol: str) -> dict:
             "high": prev_day_high, "low": prev_day_low, "close": prev_day_close,
         })
 
+    # Opening ranges in exact IST windows (same logic as extended context)
     range_5m_low = range_5m_high = range_15m_low = range_15m_high = None
-    if candles_5m_today:
-        range_5m_low = candles_5m_today[0]["low"]
-        range_5m_high = candles_5m_today[0]["high"]
-    elif candles_5m:
+
+    opening_day = today_ist
+    sorted_5m_for_day = sorted(candles_5m_today, key=_candle_sort_key) if candles_5m_today else []
+    if not sorted_5m_for_day and candles_5m:
         dates_5m = sorted({_candle_date_ist(c) for c in candles_5m if _candle_date_ist(c)}, reverse=True)
         if dates_5m:
-            first_of = [c for c in candles_5m if _candle_date_ist(c) == dates_5m[0]]
-            if first_of:
-                range_5m_low = first_of[0]["low"]
-                range_5m_high = first_of[0]["high"]
-    if candles_15m_today:
-        range_15m_low = candles_15m_today[0]["low"]
-        range_15m_high = candles_15m_today[0]["high"]
-    elif candles_15m:
-        dates_15m = sorted({_candle_date_ist(c) for c in candles_15m if _candle_date_ist(c)}, reverse=True)
-        if dates_15m:
-            first_of = [c for c in candles_15m if _candle_date_ist(c) == dates_15m[0]]
-            if first_of:
-                range_15m_low = first_of[0]["low"]
-                range_15m_high = first_of[0]["high"]
+            opening_day = dates_5m[0]
+            sorted_5m_for_day = sorted([c for c in candles_5m if _candle_date_ist(c) == opening_day], key=_candle_sort_key)
+
+    if sorted_5m_for_day:
+        win_5 = _candles_at_times_ist(sorted_5m_for_day, opening_day, {dt_time(9, 20)})
+        if not win_5:
+            win_5 = _candles_in_window_ist(sorted_5m_for_day, opening_day, OPENING_TIME, dt_time(9, 20))
+        if not win_5:
+            c0 = _opening_candle_today(sorted_5m_for_day, opening_day)
+            win_5 = [c0] if c0 else []
+        if win_5:
+            range_5m_low = min(c["low"] for c in win_5)
+            range_5m_high = max(c["high"] for c in win_5)
+
+        win_15 = _candles_at_times_ist(sorted_5m_for_day, opening_day, {dt_time(9, 20), dt_time(9, 25), dt_time(9, 30)})
+        if not win_15:
+            win_15 = _candles_in_window_ist(sorted_5m_for_day, opening_day, OPENING_TIME, dt_time(9, 30))
+        if not win_15:
+            after_open = [c for c in sorted_5m_for_day if (_candle_dt_ist(c) and _candle_dt_ist(c).time() >= OPENING_TIME)]
+            win_15 = after_open[:3]
+        if win_15:
+            range_15m_low = min(c["low"] for c in win_15)
+            range_15m_high = max(c["high"] for c in win_15)
 
     chart_candles = []
     for c in candles_5m:
         dt = _candle_dt_ist(c)
-        if not dt:
+        if not dt or not _is_market_hours_ist(dt):
             continue
         time_str = dt.strftime("%Y-%m-%dT%H:%M")
         chart_candles.append({

@@ -1,4 +1,6 @@
 """Market context: index price, EMAs, CPR, bias, ranges. Uses Upstox when connected."""
+import asyncio
+import logging
 import urllib.parse
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -10,6 +12,10 @@ from app.api.auth import get_upstox_token
 from app.services.candle_service import get_extended_market_context, get_chart_data
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
+
+# Max time to wait for extended context (Upstox can be slow); avoids socket hang up
+EXTENDED_CONTEXT_TIMEOUT_SEC = 28
 
 # Upstox instrument keys for indices (format: exchange|name)
 INDEX_KEYS = {
@@ -131,56 +137,93 @@ class ExtendedMarketContextResponse(BaseModel):
     chart_candles: list[ChartCandle] | None = None
 
 
+def _extended_fallback(symbol_upper: str, reason: str = "placeholder") -> ExtendedMarketContextResponse:
+    """Return a safe fallback so the UI never gets socket hang up."""
+    return ExtendedMarketContextResponse(
+        symbol=symbol_upper,
+        last_price=0.0,
+        bias="NO_TRADE",
+        source=reason,
+    )
+
+
 @router.get("/context/extended/{symbol}", response_model=ExtendedMarketContextResponse)
 async def get_extended_context(symbol: str):
     """Extended market context: LTP, CPR (with trend hint), today 5m/15m range, prev day H/L, 20 & 200 EMA."""
-    symbol_upper = symbol.upper()
-    if symbol_upper not in INDEX_KEYS:
-        raise HTTPException(status_code=400, detail="Symbol must be NIFTY or SENSEX")
+    try:
+        symbol_upper = symbol.upper()
+        if symbol_upper not in INDEX_KEYS:
+            raise HTTPException(status_code=400, detail="Symbol must be NIFTY or SENSEX")
 
-    token = get_upstox_token()
-    if not token:
+        token = get_upstox_token()
+        if not token:
+            return _extended_fallback(symbol_upper, "placeholder")
+
+        try:
+            base_ctx = await get_market_context(symbol_upper)
+        except Exception as e:
+            _log.warning("Extended context: get_market_context failed for %s: %s", symbol_upper, e)
+            return _extended_fallback(symbol_upper, "error")
+
+        try:
+            extended = await asyncio.wait_for(
+                get_extended_market_context(token, symbol_upper),
+                timeout=EXTENDED_CONTEXT_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            _log.warning("Extended context: Upstox timed out for %s", symbol_upper)
+            return ExtendedMarketContextResponse(
+                symbol=symbol_upper,
+                last_price=base_ctx.last_price,
+                bias=base_ctx.bias,
+                source="timeout",
+                chart_candles=None,
+            )
+        except Exception as e:
+            _log.warning("Extended context: get_extended_market_context failed for %s: %s", symbol_upper, e)
+            return ExtendedMarketContextResponse(
+                symbol=symbol_upper,
+                last_price=base_ctx.last_price,
+                bias=base_ctx.bias,
+                source="error",
+                chart_candles=None,
+            )
+
+        ema20 = extended.get("ema20_15m")
+        ema200 = extended.get("ema200_15m")
+        if ema20 is not None and ema200 is not None:
+            bias = "BUY" if ema20 > ema200 else ("SELL" if ema20 < ema200 else "NO_TRADE")
+        else:
+            bias = base_ctx.bias
+
         return ExtendedMarketContextResponse(
             symbol=symbol_upper,
-            last_price=0.0,
-            bias="NO_TRADE",
-            source="placeholder",
+            last_price=base_ctx.last_price,
+            bias=bias,
+            source=base_ctx.source,
+            ema20_15m=extended.get("ema20_15m"),
+            ema200_15m=extended.get("ema200_15m"),
+            ema20_5m=extended.get("ema20_5m"),
+            ema200_5m=extended.get("ema200_5m"),
+            cpr_pivot=extended.get("cpr_pivot"),
+            cpr_bottom=extended.get("cpr_bottom"),
+            cpr_top=extended.get("cpr_top"),
+            cpr_width=extended.get("cpr_width"),
+            cpr_width_pct=extended.get("cpr_width_pct"),
+            cpr_trend_hint=extended.get("cpr_trend_hint"),
+            range_5m_low=extended.get("range_5m_low"),
+            range_5m_high=extended.get("range_5m_high"),
+            range_15m_low=extended.get("range_15m_low"),
+            range_15m_high=extended.get("range_15m_high"),
+            prev_day_high=extended.get("prev_day_high"),
+            prev_day_low=extended.get("prev_day_low"),
+            chart_candles=_extended_chart_candles(extended.get("chart_candles")),
         )
-
-    # LTP from quote
-    base_ctx = await get_market_context(symbol_upper)
-    extended = await get_extended_market_context(token, symbol_upper)
-
-    ema20 = extended.get("ema20_15m")
-    ema200 = extended.get("ema200_15m")
-    if ema20 is not None and ema200 is not None:
-        bias = "BUY" if ema20 > ema200 else ("SELL" if ema20 < ema200 else "NO_TRADE")
-    else:
-        bias = base_ctx.bias
-
-    return ExtendedMarketContextResponse(
-        symbol=symbol_upper,
-        last_price=base_ctx.last_price,
-        bias=bias,
-        source=base_ctx.source,
-        ema20_15m=extended.get("ema20_15m"),
-        ema200_15m=extended.get("ema200_15m"),
-        ema20_5m=extended.get("ema20_5m"),
-        ema200_5m=extended.get("ema200_5m"),
-        cpr_pivot=extended.get("cpr_pivot"),
-        cpr_bottom=extended.get("cpr_bottom"),
-        cpr_top=extended.get("cpr_top"),
-        cpr_width=extended.get("cpr_width"),
-        cpr_width_pct=extended.get("cpr_width_pct"),
-        cpr_trend_hint=extended.get("cpr_trend_hint"),
-        range_5m_low=extended.get("range_5m_low"),
-        range_5m_high=extended.get("range_5m_high"),
-        range_15m_low=extended.get("range_15m_low"),
-        range_15m_high=extended.get("range_15m_high"),
-        prev_day_high=extended.get("prev_day_high"),
-        prev_day_low=extended.get("prev_day_low"),
-        chart_candles=_extended_chart_candles(extended.get("chart_candles")),
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log.exception("Extended context: unhandled error for %s: %s", symbol, e)
+        return _extended_fallback(symbol.upper() if symbol else "NIFTY", "error")
 
 
 def _extended_chart_candles(raw: list | None) -> list[ChartCandle] | None:

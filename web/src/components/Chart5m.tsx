@@ -65,11 +65,12 @@ export default function Chart5m({ symbol, extendedContext = null }: { symbol: 'N
   const [status, setStatus] = useState<ChartStatus>('loading');
   const [dataAsOf, setDataAsOf] = useState<string | null>(null);
 
-  // lightweight-charts v5: intraday data must use UTCTimestamp (seconds). Backend sends "YYYY-MM-DDTHH:mm" (IST).
+  // lightweight-charts v5: chart displays timestamps as UTC with no TZ support. Backend sends IST (9:15–15:30).
+  // Treat backend time as "display time" by parsing as UTC (append Z) so axis shows 9:15, 10:10, 15:30 not 4:45, 5:40, 10:00.
   type UTCTimestamp = import('lightweight-charts').UTCTimestamp;
   const timeToUTC = useCallback((timeStr: string): UTCTimestamp => {
-    const withTz = timeStr.includes('T') ? `${timeStr}+05:30` : timeStr;
-    return Math.floor(new Date(withTz).getTime() / 1000) as UTCTimestamp;
+    const asUTC = timeStr.includes('T') ? `${timeStr}:00Z` : `${timeStr}T00:00:00Z`;
+    return Math.floor(new Date(asUTC).getTime() / 1000) as UTCTimestamp;
   }, []);
 
   const renderChart = useCallback(async (data: ChartData) => {
@@ -86,6 +87,7 @@ export default function Chart5m({ symbol, extendedContext = null }: { symbol: 'N
       height: 380,
       timeScale: { timeVisible: true, secondsVisible: false },
       rightPriceScale: { borderColor: 'var(--border)' },
+      leftPriceScale: { visible: true, borderColor: 'var(--border)' },
     });
     chartRef.current = chart;
 
@@ -103,6 +105,7 @@ export default function Chart5m({ symbol, extendedContext = null }: { symbol: 'N
       borderVisible: true,
       wickUpColor: 'var(--positive)',
       wickDownColor: 'var(--negative)',
+      priceScaleId: 'right',
     });
     candlestickSeries.setData(candlesWithUTC);
     setDataAsOf(data.candles[data.candles.length - 1].time);
@@ -115,49 +118,56 @@ export default function Chart5m({ symbol, extendedContext = null }: { symbol: 'N
       { time: lastTime, value },
     ];
 
+    // Level lines on LEFT price scale so labels don't cover recent candles on the right
+    const leftScaleOpt = { priceScaleId: 'left' as const };
+
     if (data.cpr_top != null) {
-      const s = chart.addSeries(LineSeries, { color: 'var(--positive)', lineWidth: 2, title: 'CPR Top' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'var(--positive)', lineWidth: 2, title: 'CPR Top' });
       s.setData(lineData(data.cpr_top));
     }
     if (data.cpr_pivot != null) {
-      const s = chart.addSeries(LineSeries, { color: 'var(--text-primary)', lineWidth: 1, title: 'CPR Pivot' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'var(--text-primary)', lineWidth: 1, title: 'CPR Pivot' });
       s.setData(lineData(data.cpr_pivot));
     }
     if (data.cpr_bottom != null) {
-      const s = chart.addSeries(LineSeries, { color: 'var(--negative)', lineWidth: 2, title: 'CPR Bottom' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'var(--negative)', lineWidth: 2, title: 'CPR Bottom' });
       s.setData(lineData(data.cpr_bottom));
     }
     if (data.prev_day_high != null) {
-      const s = chart.addSeries(LineSeries, { color: 'rgba(34, 197, 94, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Prev Day High' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'rgba(34, 197, 94, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Prev Day High' });
       s.setData(lineData(data.prev_day_high));
     }
     if (data.prev_day_low != null) {
-      const s = chart.addSeries(LineSeries, { color: 'rgba(239, 68, 68, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Prev Day Low' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'rgba(239, 68, 68, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Prev Day Low' });
       s.setData(lineData(data.prev_day_low));
     }
     if (data.range_5m_low != null) {
-      const s = chart.addSeries(LineSeries, { color: 'rgba(250, 204, 21, 0.8)', lineWidth: 1, lineStyle: 2, title: 'Today 5m Low' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'rgba(250, 204, 21, 0.8)', lineWidth: 1, lineStyle: 2, title: 'Opening 5m Low' });
       s.setData(lineData(data.range_5m_low));
     }
     if (data.range_5m_high != null) {
-      const s = chart.addSeries(LineSeries, { color: 'rgba(250, 204, 21, 0.8)', lineWidth: 1, lineStyle: 2, title: 'Today 5m High' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'rgba(250, 204, 21, 0.8)', lineWidth: 1, lineStyle: 2, title: 'Opening 5m High' });
       s.setData(lineData(data.range_5m_high));
     }
     if (data.range_15m_low != null) {
-      const s = chart.addSeries(LineSeries, { color: 'rgba(59, 130, 246, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Today 15m Low' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'rgba(59, 130, 246, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Opening 15m Low' });
       s.setData(lineData(data.range_15m_low));
     }
     if (data.range_15m_high != null) {
-      const s = chart.addSeries(LineSeries, { color: 'rgba(59, 130, 246, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Today 15m High' });
+      const s = chart.addSeries(LineSeries, { ...leftScaleOpt, color: 'rgba(59, 130, 246, 0.7)', lineWidth: 1, lineStyle: 2, title: 'Opening 15m High' });
       s.setData(lineData(data.range_15m_high));
     }
 
     chart.timeScale().fitContent();
-    // Extend time scale to "now" so the chart shows today's date when last candle is from an earlier day
-    const nowUTC = Math.floor(Date.now() / 1000) as UTCTimestamp;
-    if (nowUTC > lastTime) {
+    // Extend time scale to current IST (display-time = IST as UTC). IST = UTC+5:30
+    const utcMs = Date.now();
+    const istMs = utcMs + (5 * 60 + 30) * 60 * 1000;
+    const d = new Date(istMs);
+    const nowDisplayStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:00Z`;
+    const nowDisplayUTC = Math.floor(new Date(nowDisplayStr).getTime() / 1000) as UTCTimestamp;
+    if (nowDisplayUTC > lastTime) {
       try {
-        chart.timeScale().setVisibleRange({ from: firstTime, to: nowUTC });
+        chart.timeScale().setVisibleRange({ from: firstTime, to: nowDisplayUTC });
       } catch {
         // ignore if range API fails
       }
@@ -226,7 +236,7 @@ export default function Chart5m({ symbol, extendedContext = null }: { symbol: 'N
     <div style={{ marginTop: '1rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          5m candles (yesterday → today) • CPR, Prev day H/L, Today 5m & 15m opening range
+          5m candles (last 3 days) • CPR, Prev day H/L, Opening 5m & 15m
         </span>
         {dataAsOf && status === 'loaded' && (
           <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>

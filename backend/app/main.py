@@ -55,6 +55,12 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api/v1")
 
 
+@app.get("/api/v1/health")
+def api_health():
+    """Quick health check; use GET /api/v1/health to verify backend is reachable (e.g. via proxy)."""
+    return {"status": "ok", "service": "capitalguard-api"}
+
+
 @app.get("/")
 def root():
     """Root: redirect to docs or return a short message so / is not 404."""

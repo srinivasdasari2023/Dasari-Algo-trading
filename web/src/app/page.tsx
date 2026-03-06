@@ -1,9 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import dynamic from 'next/dynamic';
-
-const Chart5m = dynamic(() => import('@/components/Chart5m'), { ssr: false });
 
 // Use relative path so Next.js rewrites to backend (avoids CORS). Only use NEXT_PUBLIC_API_URL if it's http(s).
 function getApiBase(): string {
@@ -83,6 +80,30 @@ type HistoryItem = {
   new_sl: number | null;
 };
 
+type HoldingOpportunity = {
+  isin: string | null;
+  exchange: string | null;
+  tradingsymbol: string | null;
+  company_name: string | null;
+  quantity: number | null;
+  average_price: number | null;
+  last_price: number | null;
+  close_price: number | null;
+  pnl: number | null;
+  day_change: number | null;
+  day_change_percentage: number | null;
+  instrument_token: string | null;
+  status: string | null;
+  direction: string | null;
+  reason: string | null;
+  bias: string | null;
+  pattern: string | null;
+  pattern_strength: number | null;
+  ema20: number | null;
+  ema200: number | null;
+  last_15m_time: string | null;
+};
+
 export default function DashboardPage() {
   const [upstoxConnected, setUpstoxConnected] = useState(false);
   const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -110,6 +131,8 @@ export default function DashboardPage() {
   const [positions, setPositions] = useState<PositionItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [signalHistory, setSignalHistory] = useState<{ symbol: string; status: string; reason: string; at: string }[]>([]);
+  const [holdingsOpp, setHoldingsOpp] = useState<HoldingOpportunity[]>([]);
+  const [holdingsMessage, setHoldingsMessage] = useState<string | null>(null);
 
   // After mount, restore from localStorage (client-only; avoids hydration mismatch)
   useEffect(() => {
@@ -174,7 +197,8 @@ export default function DashboardPage() {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('upstox') === 'connected') {
-      setUpstoxConnected(true);
+      // Don't assume connected: backend stores token in memory; always re-check.
+      fetchStatus();
       window.history.replaceState({}, '', window.location.pathname);
     }
     if (params.get('connect') === '1') {
@@ -186,15 +210,31 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Fetch market context (LTP + extended: CPR, ranges, prev day, EMAs) when Upstox is connected
+  const HEALTH_TIMEOUT_MS = 5000;
+  const MARKET_CONTEXT_TIMEOUT_MS = 30000;
+
+  // Fetch market context (LTP + extended: CPR, ranges, prev day, EMAs) when Upstox is connected.
+  // Ping /health first so we show "Backend not reachable" quickly if backend is down (avoids long proxy errors).
   const fetchMarketContext = useCallback(async () => {
     if (!upstoxConnected) return;
     try {
+      const healthRes = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+      if (!healthRes.ok) throw new Error('Health check failed');
+    } catch {
+      setBackendReachable(false);
+      setMarketNifty(null);
+      setMarketSensex(null);
+      setExtendedNifty(null);
+      setExtendedSensex(null);
+      return;
+    }
+    setBackendReachable(true);
+    try {
       const [niftyRes, sensexRes, extNiftyRes, extSensexRes] = await Promise.all([
-        fetch(`${API_BASE}/market/context/NIFTY`),
-        fetch(`${API_BASE}/market/context/SENSEX`),
-        fetch(`${API_BASE}/market/context/extended/NIFTY`),
-        fetch(`${API_BASE}/market/context/extended/SENSEX`),
+        fetch(`${API_BASE}/market/context/NIFTY`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
+        fetch(`${API_BASE}/market/context/SENSEX`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
+        fetch(`${API_BASE}/market/context/extended/NIFTY`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
+        fetch(`${API_BASE}/market/context/extended/SENSEX`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
       ]);
       const niftyData = niftyRes.ok ? await niftyRes.json() : null;
       const sensexData = sensexRes.ok ? await sensexRes.json() : null;
@@ -207,6 +247,7 @@ export default function DashboardPage() {
       setMarketSensex(null);
       setExtendedNifty(null);
       setExtendedSensex(null);
+      setBackendReachable(false);
     }
   }, [upstoxConnected]);
 
@@ -278,15 +319,30 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchHoldingsOpp = useCallback(async () => {
+    if (!upstoxConnected) return;
+    try {
+      const res = await fetch(`${API_BASE}/portfolio/holdings/opportunities?limit=10`, { signal: AbortSignal.timeout(30000) });
+      const data = await res.json();
+      setHoldingsOpp(Array.isArray(data?.items) ? data.items : []);
+      setHoldingsMessage(typeof data?.message === 'string' ? data.message : null);
+    } catch {
+      setHoldingsOpp([]);
+      setHoldingsMessage('Failed to load holdings from backend.');
+    }
+  }, [upstoxConnected]);
+
   useEffect(() => {
     fetchPositions();
     fetchHistory();
+    fetchHoldingsOpp();
     const t = setInterval(() => {
       fetchPositions();
       fetchHistory();
+      fetchHoldingsOpp();
     }, 20000);
     return () => clearInterval(t);
-  }, [fetchPositions, fetchHistory]);
+  }, [fetchPositions, fetchHistory, fetchHoldingsOpp]);
 
   const handleTradingModeClick = (mode: 'MANUAL' | 'SEMI_AUTO' | 'FULL_AUTO') => {
     if (mode === 'MANUAL') {
@@ -598,7 +654,7 @@ export default function DashboardPage() {
                           </div>
                         )}
                         <div>
-                          <span style={{ color: 'var(--text-muted)' }}>5m opening range (beginning of day)</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Opening 5m (9:15–9:20)</span>
                           <div style={{ fontWeight: 600 }}>
                             {ext.range_5m_low != null && ext.range_5m_high != null
                               ? `${ext.range_5m_low.toFixed(2)} – ${ext.range_5m_high.toFixed(2)}`
@@ -606,7 +662,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div>
-                          <span style={{ color: 'var(--text-muted)' }}>15m opening range (beginning of day)</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Opening 15m (9:15–9:30)</span>
                           <div style={{ fontWeight: 600 }}>
                             {ext.range_15m_low != null && ext.range_15m_high != null
                               ? `${ext.range_15m_low.toFixed(2)} – ${ext.range_15m_high.toFixed(2)}`
@@ -658,15 +714,15 @@ export default function DashboardPage() {
                     </div>
                   );
                 })()}
-                {/* 5m candlestick chart: yesterday → today with CPR, prev day H/L, today 5m & 15m range */}
-                {upstoxConnected && (selectedIndex === 'NIFTY' ? extendedNifty : extendedSensex) && (
-                  <Chart5m symbol={selectedIndex} extendedContext={selectedIndex === 'NIFTY' ? extendedNifty : extendedSensex} />
-                )}
                 {(marketNifty?.source === 'live' || marketSensex?.source === 'live') && (
                   <div style={{ fontSize: '0.75rem', color: 'var(--positive)', marginTop: '0.5rem' }}>Live data • refreshes every 15s</div>
                 )}
                 {marketNifty?.source !== 'live' && marketSensex?.source !== 'live' && (
-                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Fetching… (market may be closed)</div>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                    {backendReachable === false
+                      ? 'Backend not reachable. Start the backend (run .\\Start-All.ps1 from project root).'
+                      : 'Fetching… (market may be closed)'}
+                  </div>
                 )}
               </>
             ) : (
@@ -929,6 +985,63 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+        </section>
+
+        {/* 3b. Holdings – Intraday opportunities (15m) */}
+        <section className="card dashboard-section" style={{ marginBottom: '1.25rem' }}>
+          <h2 className="card-title" style={{ marginBottom: '1rem' }}>Holdings • Intraday opportunities (15m)</h2>
+          {!upstoxConnected ? (
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Connect Upstox to load holdings.</div>
+          ) : (
+            <div className="overview-table-wrap">
+              <table className="overview-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Qty</th>
+                    <th>LTP</th>
+                    <th>P&L</th>
+                    <th>15m opp</th>
+                    <th>Reason</th>
+                    <th>As of</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holdingsOpp.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', padding: '1rem', textAlign: 'center' }}>
+                        {holdingsMessage ?? 'No holdings (or Upstox not connected / slow). Try again in 30s.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    holdingsOpp.map((h) => {
+                      const isSignal = h.status === 'SIGNAL';
+                      const dir = h.direction ?? '—';
+                      const dirColor = dir === 'BUY' ? 'var(--positive)' : dir === 'SELL' ? 'var(--negative)' : 'var(--text-muted)';
+                      return (
+                        <tr key={h.instrument_token ?? `${h.tradingsymbol}-${h.isin}`}>
+                          <td style={{ whiteSpace: 'nowrap' }}>{h.tradingsymbol ?? '—'}</td>
+                          <td>{h.quantity ?? '—'}</td>
+                          <td>{typeof h.last_price === 'number' ? `₹ ${h.last_price.toFixed(2)}` : '—'}</td>
+                          <td style={{ color: typeof h.pnl === 'number' ? (h.pnl >= 0 ? 'var(--positive)' : 'var(--negative)') : 'var(--text-muted)' }}>
+                            {typeof h.pnl === 'number' ? `₹ ${h.pnl.toFixed(2)}` : '—'}
+                          </td>
+                          <td style={{ fontWeight: 700, color: isSignal ? dirColor : 'var(--text-muted)' }}>
+                            {isSignal ? dir : 'NO'}
+                          </td>
+                          <td style={{ maxWidth: 360 }}>{h.reason ?? '—'}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{h.last_15m_time ? h.last_15m_time.replace('T', ' ') : '—'}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+              <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Logic: EMA20 vs EMA200 on 15m + 15m engulfing pattern alignment. Top 10 holdings by value.
+              </div>
+            </div>
+          )}
         </section>
 
         {/* 4. Signal panel */}
