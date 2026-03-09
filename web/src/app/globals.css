@@ -138,12 +138,35 @@ body {
   padding: 1.25rem 1.5rem;
 }
 
-/* Trade settings – aligned grid; min column width so dropdown text doesn't truncate */
+/* Trade settings – single row on desktop; wraps on smaller screens */
 .trade-settings-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 1.25rem;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1rem;
   align-items: start;
+}
+
+.market-context-metrics {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 1rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.25rem;
+}
+
+.market-context-metrics > div {
+  flex: 0 0 auto;
+  min-width: 180px;
+}
+
+.market-context-metrics::-webkit-scrollbar {
+  height: 8px;
+}
+
+.market-context-metrics::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
 }
 
 .trade-settings-field {
@@ -163,7 +186,7 @@ body {
 
 .trade-settings-input {
   width: 100%;
-  min-width: 10rem;
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   line-height: 1.25;
@@ -174,10 +197,13 @@ body {
   height: 2.25rem;
   min-height: 2.25rem;
   box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 select.trade-settings-input {
-  min-width: 11.5rem;
+  min-width: 0;
   appearance: auto;
 }
 
@@ -292,6 +318,12 @@ select.trade-settings-input {
 
 .overview-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+@media (max-width: 1200px) {
+  .trade-settings-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 @media (max-width: 900px) {
