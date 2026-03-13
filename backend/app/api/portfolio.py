@@ -14,6 +14,9 @@ from app.services.portfolio_service import (
 
 router = APIRouter()
 
+# Max time for holdings/opportunities (many Upstox calls); respond before proxy socket hang up
+HOLDINGS_OPP_TIMEOUT_SEC = 22
+
 
 class HoldingItem(BaseModel):
     isin: str | None = None
@@ -114,13 +117,29 @@ class HoldingsOpportunitiesResponse(BaseModel):
 async def get_holdings_opportunities(limit: int = 10, reduce_pct: int | None = None):
     """
     Holdings plus 15m opportunity per holding (top N by value).
-    If reduce_pct is set (20, 30, or 50), uses reduce-on-weakness / buy-back-on-strength strategy
-    and returns action (REDUCE | BUY_BACK | NO_ACTION), suggested_qty, reduce_pct.
+    If reduce_pct is set (20, 30, or 50), uses reduce-on-weakness / buy-back-on-strength strategy.
+    Time-limited to avoid proxy socket hang up.
     """
     token = get_upstox_token()
     if not token:
         return HoldingsOpportunitiesResponse(items=[], connected=False, message="Upstox not connected")
 
+    try:
+        return await asyncio.wait_for(
+            _holdings_opportunities_impl(token, limit, reduce_pct),
+            timeout=HOLDINGS_OPP_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        return HoldingsOpportunitiesResponse(
+            items=[], connected=True, message="Holdings data timed out (Upstox slow). Try again.",
+        )
+    except Exception:
+        return HoldingsOpportunitiesResponse(
+            items=[], connected=True, message="Holdings request failed. Try again.",
+        )
+
+
+async def _holdings_opportunities_impl(token: str, limit: int, reduce_pct: int | None) -> HoldingsOpportunitiesResponse:
     meta = await fetch_upstox_holdings_meta(token)
     raw = meta.get("items") or []
     holdings: list[dict] = [h for h in raw if isinstance(h, dict)]

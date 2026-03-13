@@ -14,8 +14,8 @@ from app.services.candle_service import get_extended_market_context, get_chart_d
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-# Max time to wait for extended context (Upstox can be slow); avoids socket hang up
-EXTENDED_CONTEXT_TIMEOUT_SEC = 28
+# Max time to wait for extended context (Upstox can be slow). Keep under 25s to avoid proxy/socket hang up.
+EXTENDED_CONTEXT_TIMEOUT_SEC = 22
 
 # Upstox instrument keys for indices (format: exchange|name)
 INDEX_KEYS = {
@@ -150,8 +150,8 @@ def _extended_fallback(symbol_upper: str, reason: str = "placeholder") -> Extend
 @router.get("/context/extended/{symbol}", response_model=ExtendedMarketContextResponse)
 async def get_extended_context(symbol: str):
     """Extended market context: LTP, CPR (with trend hint), today 5m/15m range, prev day H/L, 20 & 200 EMA."""
+    symbol_upper = (symbol or "NIFTY").upper()
     try:
-        symbol_upper = symbol.upper()
         if symbol_upper not in INDEX_KEYS:
             raise HTTPException(status_code=400, detail="Symbol must be NIFTY or SENSEX")
 
@@ -172,6 +172,15 @@ async def get_extended_context(symbol: str):
             )
         except asyncio.TimeoutError:
             _log.warning("Extended context: Upstox timed out for %s", symbol_upper)
+            return ExtendedMarketContextResponse(
+                symbol=symbol_upper,
+                last_price=base_ctx.last_price,
+                bias=base_ctx.bias,
+                source="timeout",
+                chart_candles=None,
+            )
+        except asyncio.CancelledError:
+            _log.warning("Extended context: cancelled for %s", symbol_upper)
             return ExtendedMarketContextResponse(
                 symbol=symbol_upper,
                 last_price=base_ctx.last_price,
@@ -223,7 +232,7 @@ async def get_extended_context(symbol: str):
         raise
     except Exception as e:
         _log.exception("Extended context: unhandled error for %s: %s", symbol, e)
-        return _extended_fallback(symbol.upper() if symbol else "NIFTY", "error")
+        return _extended_fallback(symbol_upper, "error")
 
 
 def _extended_chart_candles(raw: list | None) -> list[ChartCandle] | None:

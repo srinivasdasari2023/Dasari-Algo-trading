@@ -228,9 +228,9 @@ export default function DashboardPage() {
 
   const HEALTH_TIMEOUT_MS = 5000;
   const MARKET_CONTEXT_TIMEOUT_MS = 30000;
+  const EXTENDED_CONTEXT_TIMEOUT_MS = 28000;
 
-  // Fetch market context (LTP + extended: CPR, ranges, prev day, EMAs) when Upstox is connected.
-  // Ping /health first so we show "Backend not reachable" quickly if backend is down (avoids long proxy errors).
+  // Fetch market context (LTP + extended). Ping /health first. Fetch extended NIFTY then SENSEX sequentially to avoid proxy socket hang up.
   const fetchMarketContext = useCallback(async () => {
     if (!upstoxConnected) return;
     try {
@@ -247,18 +247,6 @@ export default function DashboardPage() {
     }
     setBackendReachable(true);
     try {
-      const settled = await Promise.allSettled([
-        fetch(`${API_BASE}/market/context/NIFTY`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
-        fetch(`${API_BASE}/market/context/SENSEX`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
-        fetch(`${API_BASE}/market/context/extended/NIFTY`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
-        fetch(`${API_BASE}/market/context/extended/SENSEX`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
-      ]);
-
-      const resNifty = settled[0].status === 'fulfilled' ? settled[0].value : null;
-      const resSensex = settled[1].status === 'fulfilled' ? settled[1].value : null;
-      const resExtNifty = settled[2].status === 'fulfilled' ? settled[2].value : null;
-      const resExtSensex = settled[3].status === 'fulfilled' ? settled[3].value : null;
-
       const safeJson = async (res: Response | null) => {
         if (!res || !res.ok) return null;
         try {
@@ -268,12 +256,28 @@ export default function DashboardPage() {
         }
       };
 
-      const [niftyData, sensexData, extNiftyData, extSensexData] = await Promise.all([
-        safeJson(resNifty),
-        safeJson(resSensex),
-        safeJson(resExtNifty),
-        safeJson(resExtSensex),
+      const [resNifty, resSensex] = await Promise.all([
+        fetch(`${API_BASE}/market/context/NIFTY`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
+        fetch(`${API_BASE}/market/context/SENSEX`, { signal: AbortSignal.timeout(MARKET_CONTEXT_TIMEOUT_MS) }),
       ]);
+      const niftyData = await safeJson(resNifty);
+      const sensexData = await safeJson(resSensex);
+
+      let resExtNifty: Response | null = null;
+      let resExtSensex: Response | null = null;
+      try {
+        resExtNifty = await fetch(`${API_BASE}/market/context/extended/NIFTY`, { signal: AbortSignal.timeout(EXTENDED_CONTEXT_TIMEOUT_MS) });
+      } catch {
+        resExtNifty = null;
+      }
+      try {
+        resExtSensex = await fetch(`${API_BASE}/market/context/extended/SENSEX`, { signal: AbortSignal.timeout(EXTENDED_CONTEXT_TIMEOUT_MS) });
+      } catch {
+        resExtSensex = null;
+      }
+
+      const extNiftyData = await safeJson(resExtNifty);
+      const extSensexData = await safeJson(resExtSensex);
 
       setMarketNifty((prev) =>
         niftyData ? { symbol: niftyData.symbol, last_price: niftyData.last_price, bias: niftyData.bias, source: niftyData.source } : prev
@@ -285,8 +289,9 @@ export default function DashboardPage() {
       setExtendedSensex((prev) => (extSensexData ? extSensexData : prev));
 
       const anyFailed =
-        settled.some((s) => s.status === 'rejected') ||
-        [resNifty, resSensex, resExtNifty, resExtSensex].some((r) => r !== null && !r.ok);
+        !niftyData || !sensexData ||
+        (resExtNifty !== null && !resExtNifty.ok) ||
+        (resExtSensex !== null && !resExtSensex.ok);
       setMarketDataIssue(anyFailed ? 'Market data delayed (retrying…)' : null);
     } catch {
       // Backend is reachable (health OK), but market data fetch failed/timed out.
@@ -315,7 +320,7 @@ export default function DashboardPage() {
     if (!upstoxConnected) return;
     setSignalLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/signals/evaluate/${selectedIndex}`);
+      const res = await fetch(`${API_BASE}/signals/evaluate/${selectedIndex}`, { signal: AbortSignal.timeout(28000) });
       const data = await res.json();
       setSignalNifty({
         status: data.status ?? 'NO_SIGNAL',

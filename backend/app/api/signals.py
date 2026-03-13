@@ -1,4 +1,5 @@
 """Signal evaluation and status. Fetches candles, runs strategy, returns signal."""
+import asyncio
 from datetime import datetime, timezone, timedelta, time as dt_time
 
 from fastapi import APIRouter, HTTPException
@@ -24,6 +25,9 @@ _SIGNAL_HISTORY_MAX = 100
 # NSE market hours IST (avoid cross-day pattern issues at session open/close)
 MARKET_OPEN = dt_time(9, 15)
 MARKET_CLOSE = dt_time(15, 30)
+
+# Max time for signal evaluation (Upstox can be slow); respond before proxy socket hang up
+SIGNAL_EVALUATE_TIMEOUT_SEC = 22
 
 
 def _is_market_hours_ist(ts: datetime) -> bool:
@@ -78,6 +82,31 @@ async def evaluate_signal(symbol: str):
             risk_checklist=[RiskCheckItem(rule="upstox_connected", passed=False, reason="Connect Upstox first")],
         )
 
+    try:
+        return await asyncio.wait_for(
+            _evaluate_impl(token, symbol_upper),
+            timeout=SIGNAL_EVALUATE_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        return SignalResponse(
+            signal_id=None,
+            status="NO_SIGNAL",
+            reason="Evaluation timed out (Upstox slow)",
+            time_window_ok=False,
+            risk_checklist=[],
+        )
+    except Exception:
+        return SignalResponse(
+            signal_id=None,
+            status="NO_SIGNAL",
+            reason="Evaluation failed",
+            time_window_ok=False,
+            risk_checklist=[],
+        )
+
+
+async def _evaluate_impl(token: str, symbol_upper: str) -> SignalResponse:
+    """Inner implementation so we can apply a timeout and avoid proxy socket hang up."""
     try:
         (
             candles_15m,

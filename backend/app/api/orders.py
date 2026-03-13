@@ -96,23 +96,26 @@ def place_order(req: PlaceOrderRequest):
 @router.get("/positions")
 def get_open_positions():
     """Open positions for dashboard: symbol, entry, P&L, SL and trailing SL (current sl_trigger)."""
-    items = []
-    for p in get_positions():
-        items.append(
-            PositionItem(
-                id=p.id,
-                symbol=p.symbol,
-                option_type=p.option_type,
-                side=p.side,
-                quantity=p.quantity,
-                entry_price=p.entry_price,
-                sl_trigger=p.sl_trigger,
-                initial_sl=p.initial_sl,
-                order_id=p.order_id,
-                created_at=p.created_at.isoformat(),
+    try:
+        items = []
+        for p in get_positions():
+            items.append(
+                PositionItem(
+                    id=p.id,
+                    symbol=p.symbol,
+                    option_type=p.option_type,
+                    side=p.side,
+                    quantity=p.quantity,
+                    entry_price=p.entry_price,
+                    sl_trigger=p.sl_trigger,
+                    initial_sl=p.initial_sl,
+                    order_id=p.order_id,
+                    created_at=p.created_at.isoformat() if p.created_at else "",
+                )
             )
-        )
-    return {"items": items}
+        return {"items": items}
+    except Exception:
+        return {"items": []}
 
 
 @router.post("/positions/{position_id}/trail-sl")
@@ -131,19 +134,22 @@ def trail_sl(position_id: str, body: TrailSlRequest):
 @router.get("/history")
 def orders_history(limit: int = 100):
     """Trading and trailing history for dashboard."""
-    entries = get_history(limit=limit)
-    return {
-        "items": [
-            HistoryItem(
-                id=e.id,
-                event_type=e.event_type,
-                position_id=e.position_id,
-                symbol=e.symbol,
-                at=e.at.isoformat(),
-                details=e.details,
-                old_sl=e.old_sl,
-                new_sl=e.new_sl,
-            )
-            for e in entries
-        ],
-    }
+    try:
+        entries = get_history(limit=limit)
+        return {
+            "items": [
+                HistoryItem(
+                    id=e.id,
+                    event_type=e.event_type,
+                    position_id=e.position_id,
+                    symbol=e.symbol,
+                    at=e.at.isoformat() if e.at else "",
+                    details=e.details,
+                    old_sl=e.old_sl,
+                    new_sl=e.new_sl,
+                )
+                for e in entries
+            ],
+        }
+    except Exception:
+        return {"items": []}

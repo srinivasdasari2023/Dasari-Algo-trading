@@ -6,9 +6,14 @@ Capital-preserving, high-probability index options trading system. Trades only t
 
 ---
 
-## Install and run
+## How to run
 
-**→ See [docs/INSTALL_AND_RUN.md](docs/INSTALL_AND_RUN.md)** for step-by-step instructions (prerequisites, `.env` setup, Docker for DB/Redis, backend, web, optional mobile).
+**→ [HOW-TO-RUN.md](HOW-TO-RUN.md)** — clear instructions to execute the app:
+
+1. **First-time:** Install Python 3.11+ and Node.js 18+, then run setup (venv + `pip install`, `npm install`) once.
+2. **Every time:** From project root in PowerShell run **`.\Start-All.ps1`** (or use VS Code: **Run Task → Start All**), then open **http://localhost:3000**.
+
+Detailed install (Docker, `.env`, Upstox): **[docs/INSTALL_AND_RUN.md](docs/INSTALL_AND_RUN.md)**.
 
 ---
 
@@ -36,11 +41,19 @@ Capital-preserving, high-probability index options trading system. Trades only t
 
 ## Local dev (summary)
 
-1. Copy `.env.example` to `.env` and set `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET` (see [docs/INSTALL_AND_RUN.md](docs/INSTALL_AND_RUN.md)).
-2. Start DB + Redis: `docker-compose up -d db redis`
-3. Backend: `cd backend && pip install -e ".[dev]" && uvicorn app.main:app --reload`
-4. Web: `cd web && npm install && npm run dev`
-5. Optional mobile: `cd mobile && npm install && npx react-native start`
+**→ Full step-by-step (copy-paste commands, what to set in `.env`): [HOW-TO-RUN.md](HOW-TO-RUN.md) — section “Clear 5-step run”.**
+
+Short version:
+
+1. **`.env`:** Copy `.env.example` to `.env`. Edit `.env` and set:  
+   `DATABASE_URL=postgresql://capitalguard:capitalguard@localhost:5432/capitalguard`,  
+   `REDIS_URL=redis://localhost:6379/0`,  
+   `JWT_SECRET=` (any long random string, e.g. 32+ characters).
+2. **DB + Redis:** `docker-compose up -d db redis` (Docker Desktop must be running).
+3. **Backend:** In PowerShell: `cd backend` → `.\.venv\Scripts\Activate.ps1` → `pip install -e ".[dev]"` (once) → `$env:PYTHONPATH=(Get-Location).Path; uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`.
+4. **Web:** In a second PowerShell: `cd web` → `npm install` (once) → `npm run dev`.
+5. **Browser:** Open http://localhost:3000.  
+   (Optional mobile: `cd mobile` → `npm install` → `npx react-native start`.)
 
 ---
 
