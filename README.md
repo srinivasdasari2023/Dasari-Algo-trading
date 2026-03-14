@@ -8,10 +8,14 @@ Capital-preserving, high-probability index options trading system. Trades only t
 
 ## How to run
 
-**→ [HOW-TO-RUN.md](HOW-TO-RUN.md)** — clear instructions to execute the app:
+**→ [HOW-TO-RUN.md](HOW-TO-RUN.md)** — clear instructions to execute the app.
+
+**Dashboard shows “Backend not reachable”?** → **[BACKEND-NOT-REACHABLE-FIX.md](BACKEND-NOT-REACHABLE-FIX.md)** — checklist to fix it.
 
 1. **First-time:** Install Python 3.11+ and Node.js 18+, then run setup (venv + `pip install`, `npm install`) once.
-2. **Every time:** From project root in PowerShell run **`.\Start-All.ps1`** (or use VS Code: **Run Task → Start All**), then open **http://localhost:3000**.
+2. **Every time:** From project root in PowerShell run **`.\Start-All.ps1`** (or use VS Code: **Run Task → Start All**), then open **http://localhost:3000**. Keep both backend and web terminals open.
+
+**Host in cloud (Vercel + Render):** **[HOST-IN-CLOUD.md](HOST-IN-CLOUD.md)** — step-by-step with copy-paste commands and env vars.
 
 Detailed install (Docker, `.env`, Upstox): **[docs/INSTALL_AND_RUN.md](docs/INSTALL_AND_RUN.md)**.
 
@@ -24,7 +28,7 @@ Detailed install (Docker, `.env`, Upstox): **[docs/INSTALL_AND_RUN.md](docs/INST
 | [docs/BRD.md](docs/BRD.md) | Business requirements, risk-first philosophy, MVP vs Phase-2 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | C4 + event model, service responsibilities, idempotency |
 | [docs/INFRASTRUCTURE_DEVOPS.md](docs/INFRASTRUCTURE_DEVOPS.md) | Terraform, CI/CD, secrets, backups, cost guardrails |
-| [docs/CLOUD_AND_SCHEDULE.md](docs/CLOUD_AND_SCHEDULE.md) | Deploy to cloud (Vercel + Render/Railway), run weekdays 9:15–15:30 IST only |
+| [docs/CLOUD_AND_SCHEDULE.md](docs/CLOUD_AND_SCHEDULE.md) | Deploy to cloud (Vercel + Render/Railway); **start and monitor from mobile + laptop** (one URL); weekdays 9:15–15:30 IST |
 | [docs/DELIVERY_PLAN.md](docs/DELIVERY_PLAN.md) | MVP roadmap, 8–10 sprints, epics/stories, RAID |
 
 ---

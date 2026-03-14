@@ -2,6 +2,8 @@
 
 Deploy the app to the cloud and run it **only on weekdays**, **starting in the morning** and **ending at 3:30 PM** after market hours.
 
+**→ For a step-by-step hosting guide (Vercel + Render, copy-paste ready), see [HOST-IN-CLOUD.md](../HOST-IN-CLOUD.md) in the project root.**
+
 ---
 
 ## 1. Architecture
@@ -165,3 +167,31 @@ If the server uses **UTC**, 9:00 IST = 3:30 UTC and 15:35 IST = 10:05 UTC:
 | Weekdays only (Mon–Fri) | **Cron-job.org:** Set schedule to Mon–Fri. **VPS crontab:** Use `1-5` in the day-of-week field. |
 
 After setup, open your **Vercel frontend URL** in the morning on a weekday; the backend will be up during market hours and will stop (or spin down) after 3:30 PM.
+
+---
+
+## 8. Start and monitor from mobile and laptop (one URL)
+
+Once the app is deployed (frontend on Vercel, backend on Render/Railway), you use **one dashboard URL** from both your **mobile** and **laptop**. No need to “start” the app on each device — it’s already running in the cloud.
+
+### One URL for all devices
+
+| Device   | What to do |
+|----------|------------|
+| **Laptop** | Open your Vercel URL in Chrome, Edge, or Safari (e.g. `https://your-app.vercel.app`). |
+| **Mobile** | Open the **same URL** in your phone’s browser (Chrome or Safari). You can also **Add to Home Screen** for an app-like icon. |
+
+The dashboard is responsive: it works on phone and laptop. You can start your session from either device and monitor from the other.
+
+### What you can do from both devices
+
+- **Connect Upstox** — Log in with Upstox (OAuth) once from either device. The backend stores the session, so both devices see the same connected account.
+- **Monitor trades** — View **Positions**, **Order history**, **Signals**, and **Holdings / opportunities** from the same dashboard.
+- **Market context** — NIFTY / SENSEX LTP, bias, and extended context (when the backend is up).
+- **Trade settings** — Adjust strike, target premium, and holdings strategy from either device.
+
+### Tips
+
+- **Bookmark** the Vercel URL on both phone and laptop so you can open it quickly.
+- **Mobile:** For a full-screen experience, use “Add to Home Screen” (Chrome: menu → Add to Home screen; Safari: Share → Add to Home Screen).
+- **Backend spin-down:** If you use Render/Railway free tier with keep-alive only during market hours, the first load after a spin-down may take 30–60 seconds. After that, both devices use the same live backend.

@@ -306,6 +306,19 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [upstoxConnected, fetchMarketContext]);
 
+  // Single "retry backend" action: re-check status and refresh market context
+  const retryBackend = useCallback(() => {
+    fetchStatus();
+    fetchMarketContext();
+  }, [fetchStatus, fetchMarketContext]);
+
+  // When backend is unreachable, auto-retry every 8s so dashboard recovers when user starts backend
+  useEffect(() => {
+    if (backendReachable !== false) return;
+    const t = setInterval(retryBackend, 8000);
+    return () => clearInterval(t);
+  }, [backendReachable, retryBackend]);
+
   const fetchSignalHistory = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/signals/history?limit=30`);
@@ -540,13 +553,13 @@ export default function DashboardPage() {
             </h2>
             {backendReachable === false && (
               <div style={{ margin: '0 0 1rem 0', padding: '0.75rem', background: 'rgba(218,54,51,0.15)', borderRadius: 'var(--radius)', color: 'var(--negative)', fontSize: '0.8125rem' }}>
-                <p style={{ margin: 0 }}><strong>Connection failed.</strong> Start both:</p>
+                <p style={{ margin: 0 }}><strong>Backend not reachable.</strong> Start both (keep both terminals open):</p>
                 <ol style={{ margin: '0.5rem 0 0 1.25rem', padding: 0 }}>
-                  <li>Backend: from project root run <code style={{ background: 'var(--bg-page)', padding: '0.2em 0.4em', borderRadius: 4 }}>.\Start-Backend.ps1</code></li>
-                  <li>Web app: in another terminal run <code style={{ background: 'var(--bg-page)', padding: '0.2em 0.4em', borderRadius: 4 }}>cd web; npm run dev</code></li>
+                  <li>Backend: from project root run <code style={{ background: 'var(--bg-page)', padding: '0.2em 0.4em', borderRadius: 4 }}>.\Start-Backend.ps1</code> or <code style={{ background: 'var(--bg-page)', padding: '0.2em 0.4em', borderRadius: 4 }}>.\Start-All.ps1</code></li>
+                  <li>Web app: if not using Start-All, in another terminal run <code style={{ background: 'var(--bg-page)', padding: '0.2em 0.4em', borderRadius: 4 }}>cd web; npm run dev</code></li>
                 </ol>
-                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>Open the app at <strong>http://localhost:3000</strong> (not file:// and not the API port 8000).</p>
-                <button type="button" className="btn btn-primary" style={{ marginTop: '0.75rem' }} onClick={() => fetchStatus()}>Retry connection</button>
+                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>Open the app at <strong>http://localhost:3000</strong>. Full checklist: <strong>BACKEND-NOT-REACHABLE-FIX.md</strong> in project root.</p>
+                <button type="button" className="btn btn-primary" style={{ marginTop: '0.75rem' }} onClick={() => retryBackend()}>Retry connection</button>
               </div>
             )}
             <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
@@ -648,7 +661,7 @@ export default function DashboardPage() {
                 <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
                   Backend unreachable
                 </span>
-                <button type="button" onClick={() => fetchStatus()} style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', background: 'var(--bg-page)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', cursor: 'pointer' }}>
+                <button type="button" onClick={() => retryBackend()} style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', background: 'var(--bg-page)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', cursor: 'pointer' }}>
                   Retry
                 </button>
               </>
@@ -800,7 +813,7 @@ export default function DashboardPage() {
                 {marketNifty?.source !== 'live' && marketSensex?.source !== 'live' && (
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
                     {backendReachable === false
-                      ? 'Backend not reachable. Start the backend (run .\\Start-All.ps1 from project root).'
+                      ? 'Backend not reachable. Start the backend (run .\\Start-All.ps1 or .\\Start-Backend.ps1 from project root). Retry runs every 8s.'
                       : (marketDataIssue ?? 'Fetching… (market may be closed)')}
                   </div>
                 )}

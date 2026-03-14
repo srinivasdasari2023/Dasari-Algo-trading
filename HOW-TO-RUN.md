@@ -2,6 +2,7 @@
 
 Clear step-by-step instructions to run the **Algo Trading** dashboard (backend + web).
 
+- **“Backend not reachable” / dashboard errors?** → **[BACKEND-NOT-REACHABLE-FIX.md](BACKEND-NOT-REACHABLE-FIX.md)** (checklist to remove the error).
 - **PowerShell (one script):** [Clear 5-step run](#clear-5-step-run-full-setup-with-db--redis) then [Option A](#option-a-one-command-windows-powershell) (`.\Start-All.ps1`).
 - **VS Code:** [Run from VS Code (clear steps)](#run-from-vs-code-clear-steps) — open folder, Run Task → Start All, then open http://localhost:3000.
 
