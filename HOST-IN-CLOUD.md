@@ -38,12 +38,12 @@ Use these **exact** values (adjust names if you prefer):
 | **Name** | `algo-trading-api` (or any name) |
 | **Region** | Choose closest to you (e.g. Singapore / Oregon) |
 | **Branch** | `main` |
-| **Root Directory** | Leave **empty** |
+| **Root Directory** | **`backend`** (so Render runs build/start from the backend folder) |
 | **Runtime** | **Python 3** |
-| **Build Command** | `cd backend && pip install -e .` |
-| **Start Command** | `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 
-Render sets `PORT` automatically; the start command uses it.
+Render sets `PORT` automatically. The repo has **`backend/requirements.txt`** so this build works. If you leave Root Directory empty instead, use Build: `cd backend && pip install -r requirements.txt` and Start: `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
 
 ### 1.3 Environment variables
 
