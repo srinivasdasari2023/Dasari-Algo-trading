@@ -7,6 +7,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Literal
 import uuid
 
+from app.services.trade_logger import log_trade_close
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -126,6 +128,18 @@ def close_position(position_id: str, reason: Literal["SL_HIT", "TRADE_CLOSED"] =
             old_sl=pos.sl_trigger,
             new_sl=sl_price,
         )
+    )
+    # Log trade close for daily reports. P&L fields can be filled once real fills are wired.
+    log_trade_close(
+        position_id=position_id,
+        symbol=pos.symbol,
+        side=pos.side,
+        quantity=pos.quantity,
+        exit_reason=reason if reason else details,
+        exit_index=sl_price,
+        exit_premium=None,
+        pnl_rupees=None,
+        pnl_R=None,
     )
     return pos
 

@@ -186,7 +186,7 @@ The dashboard is responsive: it works on phone and laptop. You can start your se
 ### What you can do from both devices
 
 - **Connect Upstox** — Log in with Upstox (OAuth) once from either device. The backend stores the session, so both devices see the same connected account.
-- **Monitor trades** — View **Positions**, **Order history**, **Signals**, and **Holdings / opportunities** from the same dashboard.
+- **Monitor trades** — View **Positions**, **Order history**, and **Signals** from the same dashboard.
 - **Market context** — NIFTY / SENSEX LTP, bias, and extended context (when the backend is up).
 - **Trade settings** — Adjust strike, target premium, and holdings strategy from either device.
 

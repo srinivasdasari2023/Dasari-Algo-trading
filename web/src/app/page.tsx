@@ -54,6 +54,8 @@ type SignalData = {
   risk_checklist: RiskCheckItem[];
   rejected?: boolean;
   rejected_reason?: string | null;
+  suggested_sl_price?: number | null;
+  suggested_target_price?: number | null;
 };
 
 type PositionItem = {
@@ -135,10 +137,7 @@ export default function DashboardPage() {
   const [positions, setPositions] = useState<PositionItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [signalHistory, setSignalHistory] = useState<{ symbol: string; status: string; reason: string; at: string }[]>([]);
-  const [holdingsOpp, setHoldingsOpp] = useState<HoldingOpportunity[]>([]);
-  const [holdingsMessage, setHoldingsMessage] = useState<string | null>(null);
-  const [holdingsStrategyMode, setHoldingsStrategyMode] = useState<'MANUAL' | 'SEMI_AUTO' | 'FULL_AUTO'>('MANUAL');
-  const [holdingsReducePct, setHoldingsReducePct] = useState<number>(50);
+  // Holdings feature removed – trading logic now only for index options (NIFTY/SENSEX).
 
   // After mount, restore from localStorage (client-only; avoids hydration mismatch)
   useEffect(() => {
@@ -158,21 +157,11 @@ export default function DashboardPage() {
     if (Number.isFinite(niftyStrike)) setStrikeNifty(Math.round(niftyStrike / 100) * 100);
     const sensexStrike = parseInt(localStorage.getItem('capitalguard_strike_sensex') ?? '81200', 10);
     if (Number.isFinite(sensexStrike)) setStrikeSensex(Math.round(sensexStrike / 100) * 100);
-    const hMode = (localStorage.getItem('capitalguard_holdings_mode') as 'MANUAL' | 'SEMI_AUTO' | 'FULL_AUTO') || 'MANUAL';
-    setHoldingsStrategyMode(hMode);
-    const hPct = parseInt(localStorage.getItem('capitalguard_holdings_reduce_pct') ?? '50', 10);
-    if (Number.isFinite(hPct) && [20, 30, 50].includes(hPct)) setHoldingsReducePct(hPct);
   }, []);
 
   useEffect(() => {
     localStorage.setItem('capitalguard_index', selectedIndex);
   }, [selectedIndex]);
-  useEffect(() => {
-    localStorage.setItem('capitalguard_holdings_mode', holdingsStrategyMode);
-  }, [holdingsStrategyMode]);
-  useEffect(() => {
-    localStorage.setItem('capitalguard_holdings_reduce_pct', String(holdingsReducePct));
-  }, [holdingsReducePct]);
   useEffect(() => {
     localStorage.setItem('capitalguard_mode', tradingMode);
   }, [tradingMode]);
@@ -342,6 +331,8 @@ export default function DashboardPage() {
         risk_checklist: Array.isArray(data.risk_checklist) ? data.risk_checklist : [],
         rejected: data.rejected,
         rejected_reason: data.rejected_reason,
+        suggested_sl_price: typeof data.suggested_sl_price === 'number' ? data.suggested_sl_price : null,
+        suggested_target_price: typeof data.suggested_target_price === 'number' ? data.suggested_target_price : null,
       });
       fetchSignalHistory();
     } catch {
@@ -380,57 +371,15 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const fetchHoldingsOpp = useCallback(async () => {
-    if (!upstoxConnected) return;
-    try {
-      const url = `${API_BASE}/portfolio/holdings/opportunities?limit=10&reduce_pct=${holdingsReducePct}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      const data = await res.json();
-      setHoldingsOpp(Array.isArray(data?.items) ? data.items : []);
-      setHoldingsMessage(typeof data?.message === 'string' ? data.message : null);
-    } catch {
-      setHoldingsOpp([]);
-      setHoldingsMessage('Failed to load holdings from backend.');
-    }
-  }, [upstoxConnected, holdingsReducePct]);
-
-  const recordHoldingsReduced = useCallback(async (instrumentKey: string, quantitySold: number) => {
-    try {
-      await fetch(`${API_BASE}/portfolio/holdings/reduced`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instrument_key: instrumentKey, quantity_sold: quantitySold }),
-      });
-      fetchHoldingsOpp();
-    } catch {
-      setHoldingsMessage('Failed to record reduce.');
-    }
-  }, [fetchHoldingsOpp]);
-
-  const recordHoldingsBuybackDone = useCallback(async (instrumentKey: string) => {
-    try {
-      await fetch(`${API_BASE}/portfolio/holdings/buyback-done`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instrument_key: instrumentKey }),
-      });
-      fetchHoldingsOpp();
-    } catch {
-      setHoldingsMessage('Failed to record buy-back.');
-    }
-  }, [fetchHoldingsOpp]);
-
   useEffect(() => {
     fetchPositions();
     fetchHistory();
-    fetchHoldingsOpp();
     const t = setInterval(() => {
       fetchPositions();
       fetchHistory();
-      fetchHoldingsOpp();
     }, 20000);
     return () => clearInterval(t);
-  }, [fetchPositions, fetchHistory, fetchHoldingsOpp]);
+  }, [fetchPositions, fetchHistory]);
 
   const handleTradingModeClick = (mode: 'MANUAL' | 'SEMI_AUTO' | 'FULL_AUTO') => {
     if (mode === 'MANUAL') {
@@ -1080,112 +1029,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* 3b. Holdings – Reduce on weakness / Buy back on strength (15m) */}
-        <section className="card dashboard-section" style={{ marginBottom: '1.25rem' }}>
-          <h2 className="card-title" style={{ marginBottom: '1rem' }}>Holdings • Reduce / Buy-back (15m)</h2>
-          {!upstoxConnected ? (
-            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Connect Upstox to load holdings.</div>
-          ) : (
-            <>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'center', marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Mode</span>
-                  <select
-                    value={holdingsStrategyMode}
-                    onChange={(e) => setHoldingsStrategyMode(e.target.value as 'MANUAL' | 'SEMI_AUTO' | 'FULL_AUTO')}
-                    className="trade-settings-input"
-                    style={{ width: 'auto', minWidth: '10rem' }}
-                  >
-                    <option value="MANUAL">Manual (signals + I reduced / I bought back)</option>
-                    <option value="SEMI_AUTO">Semi-Auto (confirm then execute)</option>
-                    <option value="FULL_AUTO">Full-Auto (execute on signal)</option>
-                  </select>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Reduce %</span>
-                  <select
-                    value={holdingsReducePct}
-                    onChange={(e) => setHoldingsReducePct(Number(e.target.value))}
-                    className="trade-settings-input"
-                    style={{ width: 'auto', minWidth: '6rem' }}
-                  >
-                    <option value={20}>20%</option>
-                    <option value={30}>30%</option>
-                    <option value={50}>50%</option>
-                  </select>
-                </div>
-              </div>
-              <div className="overview-table-wrap">
-                <table className="overview-table">
-                  <thead>
-                    <tr>
-                      <th>Symbol</th>
-                      <th>Qty</th>
-                      <th>LTP</th>
-                      <th>P&L</th>
-                      <th>Action</th>
-                      <th>Suggested qty</th>
-                      <th>Reason</th>
-                      <th>As of</th>
-                      {holdingsStrategyMode === 'MANUAL' && <th>Record</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {holdingsOpp.length === 0 ? (
-                      <tr>
-                        <td colSpan={holdingsStrategyMode === 'MANUAL' ? 9 : 8} style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', padding: '1rem', textAlign: 'center' }}>
-                          {holdingsMessage ?? 'No holdings (or Upstox not connected / slow). Try again in 30s.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      holdingsOpp.map((h) => {
-                        const action = h.action ?? 'NO_ACTION';
-                        const isReduce = action === 'REDUCE';
-                        const isBuyBack = action === 'BUY_BACK';
-                        const pct = h.reduce_pct ?? holdingsReducePct;
-                        const sugQty = h.suggested_qty ?? 0;
-                        return (
-                          <tr key={h.instrument_token ?? `${h.tradingsymbol}-${h.isin}`}>
-                            <td style={{ whiteSpace: 'nowrap' }}>{h.tradingsymbol ?? '—'}</td>
-                            <td>{h.quantity ?? '—'}</td>
-                            <td>{typeof h.last_price === 'number' ? `₹ ${h.last_price.toFixed(2)}` : '—'}</td>
-                            <td style={{ color: typeof h.pnl === 'number' ? (h.pnl >= 0 ? 'var(--positive)' : 'var(--negative)') : 'var(--text-muted)' }}>
-                              {typeof h.pnl === 'number' ? `₹ ${h.pnl.toFixed(2)}` : '—'}
-                            </td>
-                            <td style={{ fontWeight: 700, color: isReduce ? 'var(--negative)' : isBuyBack ? 'var(--positive)' : 'var(--text-muted)' }}>
-                              {isReduce ? `Reduce ${pct}%` : isBuyBack ? `Buy back ${pct}%` : '—'}
-                            </td>
-                            <td>{sugQty > 0 ? sugQty : '—'}</td>
-                            <td style={{ maxWidth: 320 }}>{h.reason ?? '—'}</td>
-                            <td style={{ whiteSpace: 'nowrap' }}>{h.last_15m_time ? h.last_15m_time.replace('T', ' ') : '—'}</td>
-                            {holdingsStrategyMode === 'MANUAL' && (
-                              <td style={{ whiteSpace: 'nowrap' }}>
-                                {isReduce && sugQty > 0 && (
-                                  <button type="button" className="btn btn-danger" style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }} onClick={() => recordHoldingsReduced(String(h.instrument_token), sugQty)}>
-                                    I reduced
-                                  </button>
-                                )}
-                                {isBuyBack && sugQty > 0 && (
-                                  <button type="button" className="btn btn-primary" style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }} onClick={() => recordHoldingsBuybackDone(String(h.instrument_token))}>
-                                    I bought back
-                                  </button>
-                                )}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-                <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Reduce when 15m is bearish (below EMA20 + bearish engulfing). Buy back when 15m is bullish (above EMA20 + bullish engulfing). Semi-Auto/Full-Auto: order execution coming soon.
-                </div>
-              </div>
-            </>
-          )}
-        </section>
-
         {/* 4. Signal panel */}
         <section className="card dashboard-section">
           <h2 className="card-title">Signal panel ({selectedIndex})</h2>
@@ -1216,6 +1059,28 @@ export default function DashboardPage() {
                   <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
                     {signalNifty.reason}
                   </div>
+                  {(signalNifty.suggested_sl_price != null || signalNifty.suggested_target_price != null) && (
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                      {signalNifty.suggested_sl_price != null && (
+                        <div>
+                          <strong>Suggested SL:</strong>{' '}
+                          {`~ ${Math.round(signalNifty.suggested_sl_price).toLocaleString('en-IN', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0,
+                          })}`}
+                        </div>
+                      )}
+                      {signalNifty.suggested_target_price != null && (
+                        <div>
+                          <strong>Suggested target:</strong>{' '}
+                          {`~ ${Math.round(signalNifty.suggested_target_price).toLocaleString('en-IN', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0,
+                          })}`}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {signalNifty.risk_checklist.length > 0 && (
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                       {signalNifty.risk_checklist.map((r, i) => (

@@ -18,9 +18,10 @@ This document lists all **required and supporting files** for the final strategy
 
 | File | Role |
 |------|------|
-| `backend/app/api/orders.py` | Place order (accepts `sl_trigger`, `target_premium`), list positions, trail SL `POST /positions/{id}/trail-sl`, order/history. |
-| `backend/app/services/position_store.py` | In-memory store for positions (entry, sl_trigger, order_id, etc.). |
+| `backend/app/api/orders.py` | Place order (accepts `sl_trigger`, `target_premium`), list positions, trail SL `POST /positions/{id}/trail-sl`, order/history. On each new order it logs an **OPEN** trade event for end-of-day reporting. |
+| `backend/app/services/position_store.py` | In-memory store for positions (entry, sl_trigger, order_id, etc.). When a position is closed it logs a **CLOSE** trade event for reporting. |
 | `backend/app/services/order_manager.py` | Placeholder for actual broker order placement (Upstox). |
+| `backend/app/services/trade_logger.py` | Trade logger: appends OPEN/CLOSE rows to `backend/app/logs/trades/trades-YYYY-MM-DD.csv` and can send a daily summary email using `send_daily_trade_report_email()`. |
 
 ---
 
@@ -69,5 +70,7 @@ This document lists all **required and supporting files** for the final strategy
 - **Buy/Sell signals:** Implemented in `strategy_engine.py` + `pattern_detector.py`; exposed by `signals.py` (GET `/signals/evaluate/{symbol}`).
 - **Stop-loss:** Sent with order as `sl_trigger`; stored on position; signal API returns `suggested_sl_price` (index level) to pre-fill.
 - **Book profit:** Order request has `target_premium`; signal API returns `suggested_target_price` (2R index level) to pre-fill.
+
+Daily CSV logs of trades (1 row per OPEN/CLOSE event) are written by `trade_logger.py`, and you can trigger an end-of-day email report with `send_daily_trade_report_email()`.
 
 All required and supporting files for this strategy are listed above and organized by role.

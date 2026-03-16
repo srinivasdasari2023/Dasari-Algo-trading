@@ -3,14 +3,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Literal
 
-from app.services.position_store import (
-    add_position,
-    get_positions,
-    get_position,
-    update_sl,
-    get_history,
-)
+from app.services.position_store import add_position, get_positions, get_position, update_sl, get_history
 from app.services.email_service import notify_order_placed, notify_sl_updated
+from app.services.trade_logger import log_trade_open
 
 router = APIRouter()
 
@@ -84,6 +79,21 @@ def place_order(req: PlaceOrderRequest):
         order_id=order_id,
     )
     notify_order_placed(req.symbol, req.side, req.quantity, order_id, req.sl_trigger)
+    # Log trade open for daily report (assume 1 lot behaviour from quantity)
+    log_trade_open(
+        position_id=pos.id,
+        symbol=req.symbol,
+        side=req.side,
+        quantity=req.quantity,
+        signal_id=req.signal_id,
+        signal_type=None,
+        entry_index=None,
+        expected_sl_index=None,
+        expected_target_index=None,
+        entry_premium=None,
+        sl_premium=None,
+        target_premium=req.target_premium,
+    )
     return OrderResponse(
         order_id=order_id,
         broker_order_id=None,

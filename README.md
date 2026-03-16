@@ -45,6 +45,11 @@ Detailed install (Docker, `.env`, Upstox): **[docs/INSTALL_AND_RUN.md](docs/INST
 
 **Full spec:** [docs/FINAL_STRATEGY_HIGH_PROBABILITY.md](docs/FINAL_STRATEGY_HIGH_PROBABILITY.md).
 
+### Daily trade logging & reports
+
+- Every order placed/closed is logged as CSV under `backend/app/logs/trades/trades-YYYY-MM-DD.csv` (OPEN/CLOSE events with expected SL/target and exit reason).
+- Use `trade_logger.send_daily_trade_report_email()` (e.g. from a small scheduled job) to receive an **end-of-day email** summarizing trades, with the full log in the body.
+
 ---
 
 ## Local dev (summary)
