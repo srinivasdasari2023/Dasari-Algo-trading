@@ -718,7 +718,7 @@ export default function DashboardPage() {
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>NIFTY 50</span>
                     <span style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
                       {marketNifty?.source === 'live' && marketNifty.last_price > 0
-                        ? `₹ ${marketNifty.last_price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                        ? `₹ ${Math.round(marketNifty.last_price).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
                         : '—'}
                     </span>
                   </div>
@@ -726,7 +726,7 @@ export default function DashboardPage() {
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>SENSEX</span>
                     <span style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
                       {marketSensex?.source === 'live' && marketSensex.last_price > 0
-                        ? `₹ ${marketSensex.last_price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                        ? `₹ ${Math.round(marketSensex.last_price).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
                         : '—'}
                     </span>
                   </div>
