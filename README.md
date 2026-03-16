@@ -1,6 +1,6 @@
 # CapitalGuard Algo Trader – Upstox
 
-Capital-preserving, high-probability index options trading system. Trades only the easiest market conditions (trend continuation with engulfing confirmation). Prioritizes drawdown avoidance, consistency, and long winning streaks over aggressive returns.
+Capital-preserving, high-probability index options trading system. **Final strategy:** S/R + CPR + engulfing (5m/2m); time 9:20–14:45 IST; no 15m EMA bias. Prioritizes drawdown avoidance, consistency, and long winning streaks over aggressive returns.
 
 **Stack:** Backend Python FastAPI | Web Next.js (React) | Mobile React Native | Upstox API | PostgreSQL + Redis.
 
@@ -25,6 +25,8 @@ Detailed install (Docker, `.env`, Upstox): **[docs/INSTALL_AND_RUN.md](docs/INST
 
 | Document | Purpose |
 |----------|---------|
+| [docs/FINAL_STRATEGY_HIGH_PROBABILITY.md](docs/FINAL_STRATEGY_HIGH_PROBABILITY.md) | **Final signal strategy:** time 9:20–14:45 IST, S/R + CPR + engulfing, no EMA bias; entry/SL/book profit |
+| [docs/STRATEGY_IMPLEMENTATION_FILES.md](docs/STRATEGY_IMPLEMENTATION_FILES.md) | **Strategy files index:** all code and docs for buy, SL, book profit |
 | [docs/BRD.md](docs/BRD.md) | Business requirements, risk-first philosophy, MVP vs Phase-2 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | C4 + event model, service responsibilities, idempotency |
 | [docs/INFRASTRUCTURE_DEVOPS.md](docs/INFRASTRUCTURE_DEVOPS.md) | Terraform, CI/CD, secrets, backups, cost guardrails |
@@ -33,13 +35,15 @@ Detailed install (Docker, `.env`, Upstox): **[docs/INSTALL_AND_RUN.md](docs/INST
 
 ---
 
-## Strategy (non-negotiable)
+## Strategy (final – high-probability signals)
 
-- **Bias:** 15-min EMA20 > EMA200 → BUY only; EMA20 < EMA200 → SELL only; else NO TRADE.
-- **Time:** 09:20–10:30, 11:15–12:30; entry cutoff 12:30; auto square-off 15:15.
-- **CPR:** Price inside CPR band → no trade.
-- **Pattern:** Bullish Engulfing (BUY), Bearish Engulfing (SELL) only.
-- **Risk:** Max 3 trades/day; 1 loss → stop for the day; 1 lot only; no scaling.
+- **Time:** **09:20–14:45 IST** (9:20 AM to 2:45 PM). No 15m EMA bias (Option B).
+- **CPR:** Price **inside** CPR band → no trade. **CPR bottom bounce** → BUY; **CPR top rejection** → SELL.
+- **BUY:** Support bounce (5m), CPR bottom bounce (5m), or Bullish engulfing + 2m entry.
+- **SELL:** Resistance rejection (5m), CPR top rejection (5m), or Bearish engulfing + 2m entry.
+- **Risk:** Max 3 trades/day; daily loss stop; 1 lot; no scaling.
+
+**Full spec:** [docs/FINAL_STRATEGY_HIGH_PROBABILITY.md](docs/FINAL_STRATEGY_HIGH_PROBABILITY.md).
 
 ---
 

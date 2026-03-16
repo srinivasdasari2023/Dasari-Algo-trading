@@ -1229,9 +1229,11 @@ export default function DashboardPage() {
                   )}
                 </>
               ) : upstoxConnected ? (
-                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Connect Upstox and wait for evaluation.</div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>No result yet. Click <strong>Evaluate</strong> or wait for auto-evaluation (every 30s).</div>
               ) : (
-                <span className="badge badge-neutral">No signal</span>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                  <strong>Connect Upstox</strong> to evaluate and see trading signals (BUY/SELL). Without a connection, the strategy has no live data.
+                </div>
               )}
             </div>
             <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>

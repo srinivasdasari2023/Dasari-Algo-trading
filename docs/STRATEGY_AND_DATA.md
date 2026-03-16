@@ -1,23 +1,21 @@
-# Strategy Implemented & Why Signals Don’t Show Yet
+# Strategy Implemented & Data
 
-## 1. Strategy We Implemented: Trend-Continuation Capital Preserver
+## 1. Final Strategy: High-Probability Signals (Option B)
 
-The **logic** is in the backend; it is **not yet wired** to live data or the API.
+**Full spec:** [FINAL_STRATEGY_HIGH_PROBABILITY.md](FINAL_STRATEGY_HIGH_PROBABILITY.md).
 
 ### Rules (in code)
 
 | Step | Rule | Where in code |
 |------|------|----------------|
-| 1. **Market bias** | 15-min EMA20 > EMA200 → **BUY only**; EMA20 < EMA200 → **SELL only**; else **NO TRADE** | `strategy_engine.get_bias()` |
-| 2. **Time filter** | Allowed: 09:20–10:30 and 11:15–12:30 IST; entry cutoff 12:30 | `strategy_engine.is_in_trading_window()` (TODO: IST check) |
-| 3. **CPR filter** | If price is inside CPR band → **no trade** (chop avoidance) | `strategy_engine.is_price_in_cpr()` |
-| 4. **Pattern** | **Only** Bullish Engulfing (BUY) or Bearish Engulfing (SELL) on 5-min | `pattern_detector.detect_engulfing()` |
-| 5. **Entry sequence** | 2-min pullback (1 candle) → next 2-min close above/below pullback high/low; 2-min close above/below EMA20 | `strategy_engine.check_entry_sequence()` |
-| 6. **Option filter** | NIFTY premium 180–220, SENSEX 480–520; ATM; spread ≤ 5%; volume spike | Not implemented yet |
+| 1. **Time filter** | **09:20–14:45 IST** (9:20 AM to 2:45 PM) | `strategy_engine.is_in_trading_window()` |
+| 2. **CPR band** | Price **inside** CPR → no trade. **CPR bottom bounce** → BUY; **CPR top rejection** → SELL | `strategy_engine.is_price_in_cpr()`; `pattern_detector.detect_cpr_bottom_bounce`, `detect_cpr_top_rejection` |
+| 3. **No 15m bias** | Signals do not require 15m EMA20 vs EMA200 (Option B) | `strategy_engine.evaluate()` |
+| 4. **BUY** | Support bounce (5m), CPR bottom bounce (5m), or Bullish engulfing + 2m entry | `pattern_detector` + `strategy_engine.evaluate()` |
+| 5. **SELL** | Resistance rejection (5m), CPR top rejection (5m), or Bearish engulfing + 2m entry | `pattern_detector` + `strategy_engine.evaluate()` |
+| 6. **Entry sequence** | For **engulfing** path only: 2m pullback → next 2m close above/below pullback and 2m EMA20 | `strategy_engine.check_entry_sequence()` |
 
-**Candlestick & price action:** Entry signals use **candlestick patterns** (bullish/bearish engulfing on 5m) and **price action** (EMAs, CPR, 2m entry sequence). **Stop loss** is set at order place (`sl_trigger`); trailing SL is updated via API. Strategy-derived SL from price action (e.g. swing low/high, ATR) can be added later.
-
-The main entry is **`strategy_engine.evaluate(ctx, engulfing)`**: it needs a **MarketContext** (EMAs, CPR, OHLC) and an optional **EngulfingResult**. The signals pipeline builds this from live 15m/5m/2m candles and runs the strategy on each evaluate.
+The main entry is **`strategy_engine.evaluate(ctx, engulfing, ..., cpr_bottom_bounce, cpr_top_rejection)`**. The signals API builds context from 15m/5m/2m candles and runs the strategy on each evaluate.
 
 ---
 

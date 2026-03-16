@@ -9,7 +9,13 @@ from typing import Literal
 from app.api.auth import get_upstox_token
 from app.services.candle_service import get_candles_and_indicators
 from app.services.market_context import MarketContext
-from app.services.pattern_detector import detect_engulfing
+from app.services.pattern_detector import (
+    detect_engulfing,
+    detect_resistance_rejection,
+    detect_support_bounce,
+    detect_cpr_bottom_bounce,
+    detect_cpr_top_rejection,
+)
 from app.services.strategy_engine import evaluate
 from app.services.risk_engine import check_daily_limits
 from app.services.email_service import notify_signal
@@ -51,6 +57,8 @@ class SignalResponse(BaseModel):
     option_instrument_key: str | None = None
     rejected: bool = False
     rejected_reason: str | None = None
+    suggested_sl_price: float | None = None   # index level for SL (use with order)
+    suggested_target_price: float | None = None  # index level for book profit (or use target premium)
 
 
 def _parse_ts(ts: str) -> datetime:
@@ -170,11 +178,35 @@ async def _evaluate_impl(token: str, symbol_upper: str) -> SignalResponse:
 
     # Engulfing on last two 5m candles
     engulfing = None
-    if len(candles_5m_today) >= 2:
-        prev_5 = candles_5m_today[-2]
+    prev_5 = candles_5m_today[-2] if len(candles_5m_today) >= 2 else None
+    if prev_5 is not None:
         engulfing = detect_engulfing(prev_5, last_5)
 
-    # Entry sequence: last two 2m candles
+    # S/R and CPR patterns (5m); all use last candle
+    ema20_5m_val = float(ema20_5m or 0)
+    resistance_rejection = False
+    support_bounce = False
+    cpr_bottom_bounce = False
+    cpr_top_rejection = False
+    if prev_5 is not None and ema20_5m_val > 0:
+        recent_high = None
+        if len(candles_5m_today) >= 3:
+            recent_high = max(
+                float(c.get("high") or 0) for c in candles_5m_today[-3:]
+            )
+        resistance_rejection = detect_resistance_rejection(
+            prev_5, last_5, ema20_5m_val, recent_high=recent_high
+        )
+        support_bounce = detect_support_bounce(prev_5, last_5, ema20_5m_val)
+    if cpr_bottom is not None and cpr_top is not None:
+        cpr_bottom_bounce = detect_cpr_bottom_bounce(
+            last_5, float(cpr_bottom), ema20_5m_val
+        )
+        cpr_top_rejection = detect_cpr_top_rejection(
+            last_5, float(cpr_top), ema20_5m_val
+        )
+
+    # Entry sequence: last two 2m candles (for engulfing path only)
     entry_ok = False
     if engulfing:
         candles_2m_today: list[dict] = []
@@ -206,16 +238,40 @@ async def _evaluate_impl(token: str, symbol_upper: str) -> SignalResponse:
             rejected_reason=risk_result.reason,
         )
 
-    # Run strategy
-    result = evaluate(ctx, engulfing, entry_sequence_ok=entry_ok)
+    # Run final strategy (Option B: no bias; S/R + CPR + engulfing+2m)
+    result = evaluate(
+        ctx,
+        engulfing,
+        entry_sequence_ok=entry_ok,
+        resistance_rejection=resistance_rejection,
+        support_bounce=support_bounce,
+        cpr_bottom_bounce=cpr_bottom_bounce,
+        cpr_top_rejection=cpr_top_rejection,
+    )
     risk_checklist.append(RiskCheckItem(rule="time_window", passed=result.time_window_ok, reason=None))
     risk_checklist.append(RiskCheckItem(rule="bias", passed=result.bias.value != "NO_TRADE", reason=result.reason))
     risk_checklist.append(RiskCheckItem(rule="cpr_filter", passed=not result.in_cpr_band, reason=None))
-    risk_checklist.append(RiskCheckItem(rule="engulfing", passed=result.pattern_ok, reason=None))
+    risk_checklist.append(RiskCheckItem(rule="pattern", passed=result.pattern_ok, reason=None))
     risk_checklist.append(RiskCheckItem(rule="entry_sequence", passed=result.entry_sequence_ok, reason=None))
 
     if result.signal in ("BUY", "SELL"):
         notify_signal(symbol_upper, result.signal, result.reason)
+
+    # Suggested SL and book-profit (index level) from signal candle
+    suggested_sl: float | None = None
+    suggested_target: float | None = None
+    if result.signal == "BUY":
+        low_, close_ = last_5["low"], last_5["close"]
+        buffer = 10.0 if symbol_upper == "SENSEX" else 5.0
+        suggested_sl = low_ - buffer
+        r = max(close_ - low_, 1.0)
+        suggested_target = close_ + 2.0 * r  # 2R
+    elif result.signal == "SELL":
+        high_, close_ = last_5["high"], last_5["close"]
+        buffer = 10.0 if symbol_upper == "SENSEX" else 5.0
+        suggested_sl = high_ + buffer
+        r = max(high_ - close_, 1.0)
+        suggested_target = close_ - 2.0 * r  # 2R
 
     resp = SignalResponse(
         signal_id=None,
@@ -225,6 +281,8 @@ async def _evaluate_impl(token: str, symbol_upper: str) -> SignalResponse:
         risk_checklist=risk_checklist,
         option_instrument_key=result.option_instrument_key,
         rejected=False,
+        suggested_sl_price=suggested_sl,
+        suggested_target_price=suggested_target,
     )
     # Persist to in-memory history for dashboard
     _signal_history.append({

@@ -14,8 +14,10 @@ from app.services.candle_service import get_extended_market_context, get_chart_d
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-# Max time to wait for extended context (Upstox can be slow). Keep under 25s to avoid proxy/socket hang up.
-EXTENDED_CONTEXT_TIMEOUT_SEC = 22
+# Max time for extended context. Total handler must respond before proxy closes (often ~25–30s).
+# Inner Upstox call limited so whole request stays under PROXY_SAFE_TIMEOUT.
+EXTENDED_CONTEXT_TIMEOUT_SEC = 14  # inner get_extended_market_context
+PROXY_SAFE_TIMEOUT_SEC = 20       # entire request (respond before proxy closes → avoids ECONNRESET)
 
 # Upstox instrument keys for indices (format: exchange|name)
 INDEX_KEYS = {
@@ -147,91 +149,108 @@ def _extended_fallback(symbol_upper: str, reason: str = "placeholder") -> Extend
     )
 
 
-@router.get("/context/extended/{symbol}", response_model=ExtendedMarketContextResponse)
-async def get_extended_context(symbol: str):
-    """Extended market context: LTP, CPR (with trend hint), today 5m/15m range, prev day H/L, 20 & 200 EMA."""
-    symbol_upper = (symbol or "NIFTY").upper()
+async def _get_extended_context_impl(symbol_upper: str) -> ExtendedMarketContextResponse:
+    """Inner implementation so we can enforce a hard timeout and avoid proxy socket hang up."""
+    if symbol_upper not in INDEX_KEYS:
+        raise HTTPException(status_code=400, detail="Symbol must be NIFTY or SENSEX")
+
+    token = get_upstox_token()
+    if not token:
+        return _extended_fallback(symbol_upper, "placeholder")
+
     try:
-        if symbol_upper not in INDEX_KEYS:
-            raise HTTPException(status_code=400, detail="Symbol must be NIFTY or SENSEX")
+        base_ctx = await asyncio.wait_for(get_market_context(symbol_upper), timeout=5.0)
+    except asyncio.TimeoutError:
+        _log.warning("Extended context: get_market_context timed out for %s", symbol_upper)
+        return _extended_fallback(symbol_upper, "timeout")
+    except Exception as e:
+        _log.warning("Extended context: get_market_context failed for %s: %s", symbol_upper, e)
+        return _extended_fallback(symbol_upper, "error")
 
-        token = get_upstox_token()
-        if not token:
-            return _extended_fallback(symbol_upper, "placeholder")
-
-        try:
-            base_ctx = await get_market_context(symbol_upper)
-        except Exception as e:
-            _log.warning("Extended context: get_market_context failed for %s: %s", symbol_upper, e)
-            return _extended_fallback(symbol_upper, "error")
-
-        try:
-            extended = await asyncio.wait_for(
-                get_extended_market_context(token, symbol_upper),
-                timeout=EXTENDED_CONTEXT_TIMEOUT_SEC,
-            )
-        except asyncio.TimeoutError:
-            _log.warning("Extended context: Upstox timed out for %s", symbol_upper)
-            return ExtendedMarketContextResponse(
-                symbol=symbol_upper,
-                last_price=base_ctx.last_price,
-                bias=base_ctx.bias,
-                source="timeout",
-                chart_candles=None,
-            )
-        except asyncio.CancelledError:
-            _log.warning("Extended context: cancelled for %s", symbol_upper)
-            return ExtendedMarketContextResponse(
-                symbol=symbol_upper,
-                last_price=base_ctx.last_price,
-                bias=base_ctx.bias,
-                source="timeout",
-                chart_candles=None,
-            )
-        except Exception as e:
-            _log.warning("Extended context: get_extended_market_context failed for %s: %s", symbol_upper, e)
-            return ExtendedMarketContextResponse(
-                symbol=symbol_upper,
-                last_price=base_ctx.last_price,
-                bias=base_ctx.bias,
-                source="error",
-                chart_candles=None,
-            )
-
-        ema20 = extended.get("ema20_15m")
-        ema200 = extended.get("ema200_15m")
-        if ema20 is not None and ema200 is not None:
-            bias = "BUY" if ema20 > ema200 else ("SELL" if ema20 < ema200 else "NO_TRADE")
-        else:
-            bias = base_ctx.bias
-
+    try:
+        extended = await asyncio.wait_for(
+            get_extended_market_context(token, symbol_upper),
+            timeout=EXTENDED_CONTEXT_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        _log.warning("Extended context: Upstox timed out for %s", symbol_upper)
         return ExtendedMarketContextResponse(
             symbol=symbol_upper,
             last_price=base_ctx.last_price,
-            bias=bias,
-            source=base_ctx.source,
-            ema20_15m=extended.get("ema20_15m"),
-            ema200_15m=extended.get("ema200_15m"),
-            ema20_5m=extended.get("ema20_5m"),
-            ema200_5m=extended.get("ema200_5m"),
-            cpr_pivot=extended.get("cpr_pivot"),
-            cpr_bottom=extended.get("cpr_bottom"),
-            cpr_top=extended.get("cpr_top"),
-            cpr_width=extended.get("cpr_width"),
-            cpr_width_pct=extended.get("cpr_width_pct"),
-            cpr_trend_hint=extended.get("cpr_trend_hint"),
-            range_5m_low=extended.get("range_5m_low"),
-            range_5m_high=extended.get("range_5m_high"),
-            range_15m_low=extended.get("range_15m_low"),
-            range_15m_high=extended.get("range_15m_high"),
-            prev_day_high=extended.get("prev_day_high"),
-            prev_day_low=extended.get("prev_day_low"),
-            chart_candles=_extended_chart_candles(extended.get("chart_candles")),
+            bias=base_ctx.bias,
+            source="timeout",
+            chart_candles=None,
         )
+    except asyncio.CancelledError:
+        _log.warning("Extended context: cancelled for %s", symbol_upper)
+        return ExtendedMarketContextResponse(
+            symbol=symbol_upper,
+            last_price=base_ctx.last_price,
+            bias=base_ctx.bias,
+            source="timeout",
+            chart_candles=None,
+        )
+    except Exception as e:
+        _log.warning("Extended context: get_extended_market_context failed for %s: %s", symbol_upper, e)
+        return ExtendedMarketContextResponse(
+            symbol=symbol_upper,
+            last_price=base_ctx.last_price,
+            bias=base_ctx.bias,
+            source="error",
+            chart_candles=None,
+        )
+
+    ema20 = extended.get("ema20_15m")
+    ema200 = extended.get("ema200_15m")
+    if ema20 is not None and ema200 is not None:
+        bias = "BUY" if ema20 > ema200 else ("SELL" if ema20 < ema200 else "NO_TRADE")
+    else:
+        bias = base_ctx.bias
+
+    return ExtendedMarketContextResponse(
+        symbol=symbol_upper,
+        last_price=base_ctx.last_price,
+        bias=bias,
+        source=base_ctx.source,
+        ema20_15m=extended.get("ema20_15m"),
+        ema200_15m=extended.get("ema200_15m"),
+        ema20_5m=extended.get("ema20_5m"),
+        ema200_5m=extended.get("ema200_5m"),
+        cpr_pivot=extended.get("cpr_pivot"),
+        cpr_bottom=extended.get("cpr_bottom"),
+        cpr_top=extended.get("cpr_top"),
+        cpr_width=extended.get("cpr_width"),
+        cpr_width_pct=extended.get("cpr_width_pct"),
+        cpr_trend_hint=extended.get("cpr_trend_hint"),
+        range_5m_low=extended.get("range_5m_low"),
+        range_5m_high=extended.get("range_5m_high"),
+        range_15m_low=extended.get("range_15m_low"),
+        range_15m_high=extended.get("range_15m_high"),
+        prev_day_high=extended.get("prev_day_high"),
+        prev_day_low=extended.get("prev_day_low"),
+        chart_candles=_extended_chart_candles(extended.get("chart_candles")),
+    )
+
+
+@router.get("/context/extended/{symbol}", response_model=ExtendedMarketContextResponse)
+async def get_extended_context(symbol: str):
+    """Extended market context: LTP, CPR, ranges, EMAs. Always responds within PROXY_SAFE_TIMEOUT to avoid socket hang up."""
+    symbol_upper = (symbol or "NIFTY").upper()
+    try:
+        return await asyncio.wait_for(
+            _get_extended_context_impl(symbol_upper),
+            timeout=PROXY_SAFE_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        _log.warning("Extended context: full request timed out for %s", symbol_upper)
+        return _extended_fallback(symbol_upper, "timeout")
+    except asyncio.CancelledError:
+        _log.warning("Extended context: request cancelled for %s", symbol_upper)
+        return _extended_fallback(symbol_upper, "timeout")
     except HTTPException:
         raise
     except Exception as e:
-        _log.exception("Extended context: unhandled error for %s: %s", symbol, e)
+        _log.exception("Extended context: unhandled error for %s: %s", symbol_upper, e)
         return _extended_fallback(symbol_upper, "error")
 
 

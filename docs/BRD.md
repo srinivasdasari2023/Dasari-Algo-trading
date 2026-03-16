@@ -36,11 +36,11 @@ CapitalGuard Algo Trader is a **capital-preserving**, **high-probability** index
 ### 3.2 Market & Signals
 
 - **FR-M1** Live index data (NIFTY, SENSEX) and 15-min/5-min/2-min candles via Upstox market data API.
-- **FR-M2** Market bias: BUY only when 15-min EMA20 > EMA200; SELL only when 15-min EMA20 < EMA200; otherwise NO TRADE.
-- **FR-M3** Time filter: trades allowed only in 09:20–10:30 and 11:15–12:30; entry cutoff 12:30.
-- **FR-M4** CPR filter: if price inside CPR band → no trade (chop avoidance).
-- **FR-M5** Pattern: only Bullish Engulfing (BUY) or Bearish Engulfing (SELL); no other candlestick patterns.
-- **FR-M6** Entry sequence: 15-min trend → 5-min strong engulfing → 2-min pullback (1 candle) → next 2-min close above/below pullback high/low, and 2-min close above/below EMA20.
+- **FR-M2** (See [FINAL_STRATEGY_HIGH_PROBABILITY.md](FINAL_STRATEGY_HIGH_PROBABILITY.md).) No 15m EMA bias required (Option B). BUY/SELL from S/R, CPR, or engulfing+2m.
+- **FR-M3** Time filter: trades allowed **09:20–14:45 IST** (9:20 AM to 2:45 PM).
+- **FR-M4** CPR filter: if price **inside** CPR band → no trade. **CPR bottom bounce** → BUY; **CPR top rejection** → SELL.
+- **FR-M5** Patterns: Support bounce (BUY), Resistance rejection (SELL), CPR bottom/top (BUY/SELL), Bullish/Bearish Engulfing + 2m entry (BUY/SELL).
+- **FR-M6** Entry sequence: for **engulfing** path only — 2-min pullback → next 2-min close above/below pullback and 2m EMA20.
 - **FR-M7** Option selection: NIFTY premium 180–220, SENSEX 480–520; ATM only; spread ≤ 5%; volume spike on entry candle.
 
 ### 3.3 Risk & Limits

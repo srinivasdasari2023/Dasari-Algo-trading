@@ -1,6 +1,6 @@
 """
-Trend-Continuation Capital Preserver – Strategy Engine.
-Deterministic: same inputs → same output. No counter-trend; engulfing only.
+Final Strategy – High-Probability Signals (Option B).
+Time 9:20–14:45 IST; no 15m EMA bias; S/R + CPR + engulfing+2m.
 """
 from dataclasses import dataclass
 from datetime import datetime, time, timezone, timedelta
@@ -33,7 +33,7 @@ class SignalResult:
 
 
 def get_bias(ema20: float, ema200: float) -> MarketBias:
-    """15-min EMA20 > EMA200 → BUY only; EMA20 < EMA200 → SELL only; else NO_TRADE."""
+    """15m EMA20 vs EMA200 (informational only; we do not require bias for signals in Option B)."""
     if ema20 > ema200:
         return MarketBias.BUY
     if ema20 < ema200:
@@ -42,7 +42,7 @@ def get_bias(ema20: float, ema200: float) -> MarketBias:
 
 
 def is_in_trading_window(ts: datetime | None = None) -> bool:
-    """Allowed: 09:20–10:30 and 11:15–12:30 IST. Entry cutoff 12:30."""
+    """Allowed: 09:20–14:45 IST (9:20 AM to 2:45 PM). Single window."""
     if ts is None:
         ts = datetime.now(IST)
     elif ts.tzinfo is None:
@@ -50,11 +50,9 @@ def is_in_trading_window(ts: datetime | None = None) -> bool:
     else:
         ts = ts.astimezone(IST)
     t = ts.time()
-    slot1_start = time(9, 20)
-    slot1_end = time(10, 30)
-    slot2_start = time(11, 15)
-    slot2_end = time(12, 30)
-    return (slot1_start <= t <= slot1_end) or (slot2_start <= t <= slot2_end)
+    window_start = time(9, 20)
+    window_end = time(14, 45)  # 2:45 PM
+    return window_start <= t <= window_end
 
 
 def is_price_in_cpr(low: float, high: float, cpr_bottom: float, cpr_top: float) -> bool:
@@ -89,36 +87,37 @@ def evaluate(
     ctx: MarketContext,
     engulfing: EngulfingResult | None,
     entry_sequence_ok: bool | None = None,
+    resistance_rejection: bool = False,
+    support_bounce: bool = False,
+    cpr_bottom_bounce: bool = False,
+    cpr_top_rejection: bool = False,
 ) -> SignalResult:
     """
-    Full evaluation: bias → time → CPR → engulfing → entry sequence → option filter.
-    Returns NO_SIGNAL with reason if any filter fails.
+    Final strategy (Option B): time → CPR band filter → pattern (no 15m bias required).
+    BUY: CPR bottom bounce, support bounce, or bullish engulfing+2m.
+    SELL: CPR top rejection, resistance rejection, or bearish engulfing+2m.
     """
     bias = get_bias(ctx.ema20_15m, ctx.ema200_15m)
-    if bias == MarketBias.NO_TRADE:
-        return SignalResult(
-            signal="NO_SIGNAL",
-            reason="No trend bias (EMA20 vs EMA200)",
-            time_window_ok=is_in_trading_window(ctx.timestamp),
-            bias=bias,
-            in_cpr_band=is_price_in_cpr(
-                ctx.low, ctx.high, ctx.cpr_bottom, ctx.cpr_top
-            ),
-            pattern_ok=False,
-            entry_sequence_ok=False,
-        )
 
     time_ok = is_in_trading_window(ctx.timestamp)
     if not time_ok:
         return SignalResult(
             signal="NO_SIGNAL",
-            reason="Outside allowed time window",
+            reason="Outside allowed time window (9:20–14:45 IST)",
             time_window_ok=False,
             bias=bias,
             in_cpr_band=is_price_in_cpr(
                 ctx.low, ctx.high, ctx.cpr_bottom, ctx.cpr_top
             ),
-            pattern_ok=engulfing is not None,
+            pattern_ok=any(
+                [
+                    engulfing is not None,
+                    resistance_rejection,
+                    support_bounce,
+                    cpr_bottom_bounce,
+                    cpr_top_rejection,
+                ]
+            ),
             entry_sequence_ok=False,
         )
 
@@ -130,26 +129,79 @@ def evaluate(
             time_window_ok=True,
             bias=bias,
             in_cpr_band=True,
-            pattern_ok=engulfing is not None,
-            entry_sequence_ok=False,
-        )
-
-    if engulfing is None or engulfing.direction != bias.value:
-        return SignalResult(
-            signal="NO_SIGNAL",
-            reason="No valid engulfing in trend direction",
-            time_window_ok=True,
-            bias=bias,
-            in_cpr_band=False,
             pattern_ok=False,
             entry_sequence_ok=False,
         )
 
-    entry_ok = entry_sequence_ok if entry_sequence_ok is not None else False
-    if not entry_ok:
+    # Path 1: CPR bottom bounce → BUY (no bias required)
+    if cpr_bottom_bounce:
+        return SignalResult(
+            signal="BUY",
+            reason="CPR bottom bounce (low at CPR bottom, close green above)",
+            time_window_ok=True,
+            bias=bias,
+            in_cpr_band=False,
+            pattern_ok=True,
+            entry_sequence_ok=True,
+            option_instrument_key=None,
+        )
+
+    # Path 2: CPR top rejection → SELL (no bias required)
+    if cpr_top_rejection:
+        return SignalResult(
+            signal="SELL",
+            reason="CPR top rejection (high at CPR top, close red below)",
+            time_window_ok=True,
+            bias=bias,
+            in_cpr_band=False,
+            pattern_ok=True,
+            entry_sequence_ok=True,
+            option_instrument_key=None,
+        )
+
+    # Path 3: Support bounce → BUY (no bias required)
+    if support_bounce:
+        return SignalResult(
+            signal="BUY",
+            reason="Support bounce (low at support, close green above EMA20)",
+            time_window_ok=True,
+            bias=bias,
+            in_cpr_band=False,
+            pattern_ok=True,
+            entry_sequence_ok=True,
+            option_instrument_key=None,
+        )
+
+    # Path 4: Resistance rejection → SELL (no bias required)
+    if resistance_rejection:
+        return SignalResult(
+            signal="SELL",
+            reason="Resistance rejection (high at resistance, close red below EMA20)",
+            time_window_ok=True,
+            bias=bias,
+            in_cpr_band=False,
+            pattern_ok=True,
+            entry_sequence_ok=True,
+            option_instrument_key=None,
+        )
+
+    # Path 5: Engulfing + 2m entry → BUY or SELL by engulfing direction (no bias required)
+    if engulfing is not None:
+        entry_ok = entry_sequence_ok if entry_sequence_ok is not None else False
+        if entry_ok:
+            return SignalResult(
+                signal=engulfing.direction,
+                reason="Engulfing + 2m entry confirmation",
+                time_window_ok=True,
+                bias=bias,
+                in_cpr_band=False,
+                pattern_ok=True,
+                entry_sequence_ok=True,
+                option_instrument_key=None,
+            )
         return SignalResult(
             signal="NO_SIGNAL",
-            reason="Entry sequence not satisfied",
+            reason="Engulfing present but entry sequence not satisfied",
             time_window_ok=True,
             bias=bias,
             in_cpr_band=False,
@@ -158,12 +210,11 @@ def evaluate(
         )
 
     return SignalResult(
-        signal=bias.value,
-        reason="Trend continuation with engulfing and entry confirmation",
+        signal="NO_SIGNAL",
+        reason="No pattern (S/R, CPR, or engulfing+entry)",
         time_window_ok=True,
         bias=bias,
         in_cpr_band=False,
-        pattern_ok=True,
-        entry_sequence_ok=True,
-        option_instrument_key=None,  # from option filter
+        pattern_ok=False,
+        entry_sequence_ok=False,
     )

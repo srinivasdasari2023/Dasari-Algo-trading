@@ -93,7 +93,7 @@ C4Component
 
     Container_Boundary(risk_svc, "Risk Service") {
         Component(daily_limits, "Daily Limits", "Python", "Max 3 trades, 1-loss stop")
-        Component(time_filter, "Time Filter", "Python", "09:20-10:30, 11:15-12:30")
+        Component(time_filter, "Time Filter", "Python", "09:20-14:45 IST")
         Component(square_off, "Square-Off", "Python", "15:15 auto close")
     }
 
